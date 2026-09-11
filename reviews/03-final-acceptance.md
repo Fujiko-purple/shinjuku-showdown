@@ -185,9 +185,31 @@ node _tools/flowtest.mjs
 node _tools/fullplay.mjs --max 200
 ```
 
-**发布到公网**：**临时公开地址已经产出并验证** ——
-`https://inline-concentrate-twin-fridge.trycloudflare.com`（Cloudflare 快速隧道，本机需保持开机）。
+## 九、正式发布（GitHub Pages）
 
-需要**固定域名**时，管线已就绪（GitHub Pages / Cloudflare Pages / Netlify / Surge），
-本机已确认可用的前提：GitHub 账号 `Fujiko-purple` 存在且系统凭据管理器存有可用凭证；`deploy/bin/cloudflared.exe` 已下载。
-**一句话即可发布，`publish.mjs` 默认 dry-run 不会误触远端。**
+用户确认「② 能打开，帮我做成 GitHub Pages 固定网址（推源码）」后执行：
+
+| 项 | 值 |
+|---|---|
+| **正式网址** | **https://fujiko-purple.github.io/shinjuku-showdown/** |
+| 仓库 | https://github.com/Fujiko-purple/shinjuku-showdown （公开） |
+| 首次提交 | `a95b162` |
+| Pages 源 | `main` 分支 `/docs` 目录 |
+| 推送内容 | 148 个文件 / 27.3 MB（源码 + 工具链 + 报告 + 发布产物） |
+| 排除项 | `shots/`（454 张过程截图）、`deploy/bin/`（52MB 二进制）、`dist/*.zip`、`dist/_fixture.html` —— 见 `.gitignore` |
+
+### 上线后的端到端实测（真实浏览器，非本机文件）
+```
+加载 20.7s → boot 走到「完成」，无 crash 面板
+交互前：bgm 无 src、__BGM_LAZY.loaded = false   ✅ 音频懒加载生效
+交互后：bgm src=assets/bgm.m4a、playing=true、volume=0.55  ✅
+试玩：mode=fight，命中宿傩（1800→1797）        ✅
+Service Worker：count=1、active=true           ✅ 离线缓存生效
+关键资源：game.js / styles.css / mobile.css / bgm.m4a / manifest / sw.js 全部 HTTP 200 + MIME 正确
+绝对路径引用：0 个                              ✅ 子目录部署正确
+页面错误：0
+```
+
+### 备用通道
+临时隧道 `https://inline-concentrate-twin-fridge.trycloudflare.com` 仍在运行（本机需开机）。
+它的价值是**当 GitHub Pages 在你所在网络不可达时的备选**；缺点是网址会随重启变化。
