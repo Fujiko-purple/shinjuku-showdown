@@ -2165,7 +2165,13 @@
     };
   }
   function createCombat(deps) {
-    const { scene: scene2, fx: fx2, weapons: weapons2, audio: audio2, city: city2, gojo: gojo2, sukuna: sukuna2 } = deps;
+    /**
+     * camera 必须解构出来：移动输入是**屏幕空间**的，要靠相机偏航旋转到世界坐标。
+     * 原来这个解构里没有 camera，导致"相对镜头移动"实际退化成世界坐标 ——
+     * 开局相机恰好在角色正后方所以看不出问题，一打起来相机跟着对手转，
+     * 前进键就变成了后退键。
+     */
+    const { scene: scene2, fx: fx2, weapons: weapons2, audio: audio2, city: city2, gojo: gojo2, sukuna: sukuna2, camera: camRef } = deps;
     const grid = new BuildingGrid(city2 && city2.buildings ? city2.buildings : [], 24);
     const wheel = new MahoragaWheel(scene2);
     const cb = {
@@ -2389,6 +2395,19 @@
         return;
       }
       if (E.dodge && pl.infinityCd <= 0) startInfinity(pl, inp);
+      /**
+       * 移动方向：输入是**屏幕空间**的（W = 屏幕上/远离镜头），必须先按相机偏航
+       * 旋转到世界坐标再交给角色。
+       *
+       * ⚠ 这里原来直接把 inp.moveX/moveZ 当世界坐标用 —— 开局相机正好在角色正后方
+       *   （yaw≈0），两套坐标碰巧一致，所以看起来是对的；**一打起来相机跟着对手转**，
+       *   "屏幕上的前"就和"世界 -z"不再重合，玩家按前进角色却往后退，
+       *   这就是用户报的「移动键是反的，打斗之后就变反了」。
+       *
+       * 偏航从相机位置反推（相机和角色的水平连线），不额外依赖 main.js 传参：
+       *   sin(yaw) = dx/len，cos(yaw) = dz/len
+       *   "远离镜头" = -(sin,cos)，"屏幕右" = (cos,-sin)
+       */
       let mx = inp.moveX;
       let mz = inp.moveZ;
       const mag = Math.hypot(mx, mz);
@@ -2397,6 +2416,16 @@
         mz /= mag;
       }
       if (mag > 0.08) {
+        const cdx = camRef ? camRef.position.x - pl.p.x : 0;
+        const cdz = camRef ? camRef.position.z - pl.p.z : 1;
+        const clen = Math.hypot(cdx, cdz);
+        if (clen > 1e-4) {
+          const sy = cdx / clen, cy = cdz / clen;
+          const wmx = mx * cy + mz * sy;
+          const wmz = mz * cy - mx * sy;
+          const wlen = Math.hypot(wmx, wmz);
+          if (wlen > 1e-6) { mx = wmx / wlen; mz = wmz / wlen; }
+        }
         const sp = inp.dash ? TUNE.DASH_SPEED : TUNE.MOVE_SPEED;
         pl.ctrl.moveTowards(pl.p.x + mx * 14, pl.p.z + mz * 14, sp, dt);
         pl.moveIntent.set(mx, 0, mz);

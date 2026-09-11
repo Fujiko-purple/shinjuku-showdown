@@ -3092,6 +3092,31 @@
       victory: { head: P(-0.3, 0.14, 0), upperArmL: P(-1.15, 0, 0.95), upperArmR: P(-1.15, 0, -0.95) }
     }
   };
+  /* 步态夸张系数（编译期作用在 walk/run 的关键帧上）
+   * 相机拉远后角色只占屏高 ~16%（1600x900 下约 130px），腿只有 ~50px，
+   * 按近景调的原始摆幅在小尺寸下几乎读不出来 —— 用户反馈"移动时腿根本不摆动"。
+   * 这里把腿部/摆臂/躯干扭转按 1.3~1.6 倍放大，冲刺比走路再大一档。
+   * 系数只作用在**显式写了值的骨骼**上，不碰采样器的补帧逻辑。 */
+  var GAIT_AMP = {
+    walk: {
+      ry: 1.7,
+      thighL: [1.55, 1, 1.25], thighR: [1.55, 1, 1.25],
+      shinL: [1.45, 1, 1], shinR: [1.45, 1, 1],
+      footL: [1.3, 1, 1], footR: [1.3, 1, 1],
+      upperArmL: [1.5, 1, 1.2], upperArmR: [1.5, 1, 1.2],
+      foreArmL: [1.3, 1, 1], foreArmR: [1.3, 1, 1],
+      hips: [1.2, 1.5, 1.6], core: [1.3, 1.4, 1.6], chest: [1.3, 1.4, 1.6]
+    },
+    run: {
+      ry: 1.8,
+      thighL: [1.6, 1, 1.3], thighR: [1.6, 1, 1.3],
+      shinL: [1.5, 1, 1], shinR: [1.5, 1, 1],
+      footL: [1.35, 1, 1], footR: [1.35, 1, 1],
+      upperArmL: [1.55, 1, 1.25], upperArmR: [1.55, 1, 1.25],
+      foreArmL: [1.35, 1, 1], foreArmR: [1.35, 1, 1],
+      hips: [1.25, 1.6, 1.7], core: [1.35, 1.5, 1.7], chest: [1.35, 1.5, 1.7]
+    }
+  };
   function createSampler(lib, overrides) {
     const cache = /* @__PURE__ */ new Map();
     const zero = P(0, 0, 0);
@@ -3103,6 +3128,19 @@
         ry: ry || 0,
         pose: Object.assign({}, pose, overrides && overrides[name] ? overrides[name] : {})
       }));
+      // 步态夸张（只放大作者显式写过的骨骼通道）
+      const amp = GAIT_AMP[name];
+      if (amp) {
+        for (const f of frames) {
+          if (amp.ry) f.ry *= amp.ry;
+          for (const bn of BONES) {
+            const s = amp[bn];
+            const v = f.pose[bn];
+            if (!s || !v) continue;
+            f.pose[bn] = [v[0] * s[0], v[1] * s[1], v[2] * s[2]];
+          }
+        }
+      }
       const base = {};
       const idle0 = lib.idle && lib.idle[0] && lib.idle[0][2] || {};
       for (const b of BONES) base[b] = idle0[b] || zero;
@@ -3291,6 +3329,15 @@
           o[2] = p[2] + (o[2] - p[2]) * bk;
         }
         poseBuf.__rootY = appliedRootY + (poseBuf.__rootY - appliedRootY) * bk;
+        // 过渡期间再加一道单帧限幅：掉帧时（一帧 50ms）也不会"啪"一下跳半个动作
+        for (const b of BONES) {
+          const o = poseBuf[b], p = appliedPose[b];
+          for (let i = 0; i < 3; i++) {
+            const dd = o[i] - p[i];
+            if (dd > 0.6) o[i] = p[i] + 0.6;
+            else if (dd < -0.6) o[i] = p[i] - 0.6;
+          }
+        }
       }
       for (const b of BONES) {
         const node = bones[b];
@@ -3329,14 +3376,20 @@
               ? (curT / dur) * Math.PI * 2
               : tGlobal * cad;
             const s = Math.sin(ph), a2 = Math.abs(s);
-            // 幅度按"角色只占屏高 16%"来定：小尺寸下动作必须夸张一点才读得出来
-            bones.hips.position.y += (a2 - 0.62) * 0.038 * amp;   // 每步一沉一浮
-            bones.hips.rotation.z += s * 0.095 * amp;             // 骨盆左右倾
-            bones.hips.rotation.y += s * 0.16 * amp;              // 骨盆旋转
-            bones.chest.rotation.y -= s * 0.22 * amp;             // 肩带反向扭转
-            bones.chest.rotation.z -= s * 0.06 * amp;
-            bones.upperArmL.rotation.x += s * 0.3 * amp;          // 摆臂幅度随速度
-            bones.upperArmR.rotation.x -= s * 0.3 * amp;
+            // 幅度按"角色只占屏高 16%"来定：小尺寸下动作必须夸张一点才读得出来。
+            // 骨盆起伏只往下沉（不抬高），保证脚不离地，同时每次落脚都有"压一下"的重量。
+            bones.hips.position.y -= a2 * 0.062 * amp;
+            bones.hips.rotation.z += s * 0.115 * amp;             // 骨盆左右倾
+            bones.hips.rotation.y += s * 0.19 * amp;              // 骨盆旋转
+            bones.chest.rotation.y -= s * 0.26 * amp;             // 肩带反向扭转
+            bones.chest.rotation.z -= s * 0.075 * amp;
+            bones.upperArmL.rotation.x += s * 0.38 * amp;         // 摆臂幅度随速度
+            bones.upperArmR.rotation.x -= s * 0.38 * amp;
+            // 冲刺前倾：速度越快上身越压，小尺寸下一眼就能看出"在跑"
+            const fwd = clamp5((spNow - 4.0) * 0.05, 0, 0.34);
+            bones.core.rotation.x += fwd;
+            bones.chest.rotation.x += fwd * 0.45;
+            bones.neck.rotation.x -= fwd * 0.55;
           }
           // 头部稳定：抵消躯干扭转与侧倾，头不会跟着"摇"（人眼/前庭会自动保持水平）
           bones.head.rotation.y -= bones.chest.rotation.y * 0.6;
@@ -3453,7 +3506,7 @@
       }
       // 攻击起手要快、位移动作可以柔一点：淡入时长按动作类型给
       blendT = 0;
-      blendDur = ONESHOT[name] ? 0.1 : (name === "walk" || name === "run" || name === "idle" ? 0.2 : 0.14);
+      blendDur = ONESHOT[name] ? 0.16 : (name === "walk" || name === "run" || name === "idle" ? 0.2 : 0.16);
       curName = name;
       curT = 0;
       ended = false;

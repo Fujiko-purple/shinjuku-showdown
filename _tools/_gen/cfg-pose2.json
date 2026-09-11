@@ -1,0 +1,98 @@
+[
+  {
+    "name": "walk-0",
+    "who": "gojo",
+    "quality": "high",
+    "anim": "walk",
+    "t": 0,
+    "az": 90,
+    "el": 4,
+    "dist": 3.4,
+    "ty": 1,
+    "bg": "dark"
+  },
+  {
+    "name": "walk-0.25",
+    "who": "gojo",
+    "quality": "high",
+    "anim": "walk",
+    "t": 0.25,
+    "az": 90,
+    "el": 4,
+    "dist": 3.4,
+    "ty": 1,
+    "bg": "dark"
+  },
+  {
+    "name": "walk-0.5",
+    "who": "gojo",
+    "quality": "high",
+    "anim": "walk",
+    "t": 0.5,
+    "az": 90,
+    "el": 4,
+    "dist": 3.4,
+    "ty": 1,
+    "bg": "dark"
+  },
+  {
+    "name": "walk-0.75",
+    "who": "gojo",
+    "quality": "high",
+    "anim": "walk",
+    "t": 0.75,
+    "az": 90,
+    "el": 4,
+    "dist": 3.4,
+    "ty": 1,
+    "bg": "dark"
+  },
+  {
+    "name": "run-0",
+    "who": "gojo",
+    "quality": "high",
+    "anim": "run",
+    "t": 0,
+    "az": 90,
+    "el": 4,
+    "dist": 3.4,
+    "ty": 1,
+    "bg": "dark"
+  },
+  {
+    "name": "run-0.3",
+    "who": "gojo",
+    "quality": "high",
+    "anim": "run",
+    "t": 0.3,
+    "az": 90,
+    "el": 4,
+    "dist": 3.4,
+    "ty": 1,
+    "bg": "dark"
+  },
+  {
+    "name": "run-0.6",
+    "who": "gojo",
+    "quality": "high",
+    "anim": "run",
+    "t": 0.6,
+    "az": 90,
+    "el": 4,
+    "dist": 3.4,
+    "ty": 1,
+    "bg": "dark"
+  },
+  {
+    "name": "run-0.9",
+    "who": "gojo",
+    "quality": "high",
+    "anim": "run",
+    "t": 0.9,
+    "az": 90,
+    "el": 4,
+    "dist": 3.4,
+    "ty": 1,
+    "bg": "dark"
+  }
+]
