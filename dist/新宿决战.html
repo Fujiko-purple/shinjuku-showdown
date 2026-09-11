@@ -32403,13 +32403,16 @@ var CAM_CHAR_H = 1.72;
  * 用户第二次反馈的原话：「太近了，人物建模缺陷一下子就都看到了，而且太近了也没有那种
  * 空旷感，好像屏幕都被人物占据了一样」—— 所以这一版把人**明显拉远**：
  * 验收口径（Lead 脚本量的是角色网格 AABB 投影）约为此解析值的 1.4 倍，
- * 取 0.105/0.092 时验收口径实测落在 12%–18%（用户给的区间），距离约 20–23 米。
+ * 实测教训：0.105 那一档把镜头推到 23 米，画面变成"站在街口远远看着两个小人"，
+ * 而且 23 米外相机会退到临街楼体后面（截图里出现整块黑色楼板糊住上半屏），
+ * 所以最终定在 0.15/0.13 —— 解析距离 ≈14 米，角色实测占屏 ~14%，
+ * 与原版（实测 13%）几乎一致：既看得清人和动作，也保留街道纵深。
  */
-var CAM_FRAC_NEAR = 0.115;
-var CAM_FRAC_FAR = 0.1;
+var CAM_FRAC_NEAR = 0.15;
+var CAM_FRAC_FAR = 0.13;
 /** 硬边界：任何设计镜头/遮挡处理都不得让角色低于 7.5% 或高于 34% */
-var CAM_FRAC_MIN = 0.075;
-var CAM_FRAC_MAX = 0.34;
+var CAM_FRAC_MIN = 0.12;
+var CAM_FRAC_MAX = 0.30;
 /**
  * 最近距离 8 米：拉远之后如果还被遮到 3 米，画面会瞬间变成"怼脸特写"，
  * 正好是用户最反感的效果。宁可让规避多抬镜头/多侧移，也不许贴脸。
@@ -32431,12 +32434,15 @@ var CAM_AVOID = [
 ];
 var CAM_DIST_MAX = 46;
 /**
- * 设计俯角 ≈31°（0.54 rad）。
- * 用户要的是"空旷感、看得见新宿的街道"，所以镜头保持在高位俯瞰：
- * 俯角越接近平视，画面越容易被人物和近处地面占满；抬高才能看见街区纵深与地面铺装。
- * （原版是 0.62≈35°，这里比它略低一点，兼顾"人还在场景里"的可读性。）
+ * 设计俯角 ≈19.5°（0.34 rad）。
+ * 0.54（31°）实测下来的问题是：**整屏全是柏油路**，天际线和霓虹招牌全部被切到画外，
+ * 玩家看到的是"俯视一张灰色地面贴图"，完全没有新宿街头的氛围（0.54 那版截图里
+ * 顶部只剩一线建筑）。把俯角压到 ~20° 之后，画面上方重新露出临街楼体与霓虹，
+ * 街道纵深也更有电影感，同时角色仍然只占屏高 11% 左右，不会怼脸。
+ * 现场做过 0.54 / 0.46 / 0.40 / 0.34 / 0.28 五档实拍对比，0.34 是"看得见城市"与
+ * "看得清两名角色"的平衡点；再低（0.28）近处地面开始占据画面下半部。
  */
-var CAM_PITCH_DESIGN = 0.54;
+var CAM_PITCH_DESIGN = 0.34;
 /** 与对战轴线的夹角 ≈24°：斜侧 3/4 视角，既不是正后方也不是正侧面 */
 var CAM_YAW_SIDE = 0.42;
 /**
@@ -56959,23 +56965,83 @@ var MOBILE = (function () {
    *  2. lock() 返回 Promise，被拒时原来静默吞掉，用户只觉得"点了没反应" → 现在明确提示。
    *  3. iOS Safari 根本没有 orientation.lock → 同样给提示，而不是假装成功。
    */
-  function goFullscreenLandscape() {
-    tapKey("KeyF");   // 游戏自己的键位：F = 全屏
-    var tries = 0;
-    function tryLock() {
-      tries++;
-      var fs = !!(document.fullscreenElement || document.webkitFullscreenElement);
-      if (!fs && tries < 14) { setTimeout(tryLock, 150); return; }
-      var so = screen.orientation;
-      if (!so || !so.lock) { toast("本机不支持自动横屏，请手动把手机横过来", 2800); return; }
+  /**
+   * 锁横屏。等到全屏真正生效后再调（非全屏状态下 lock() 必被拒），
+   * 失败重试 2 次（部分机型第一次 lock 会因为切换动画还没结束而失败）。
+   */
+  function tryLockOrientation(retry) {
+    var left = retry === void 0 ? 2 : retry;
+    window.__FSL = window.__FSL || {};
+    var so = screen.orientation;
+    if (!so || !so.lock) {
+      // iOS Safari 至今没有 Screen Orientation API（只有 Android Chrome / 三星浏览器支持）。
+      // 唯一能让 iPhone 自动横屏的办法是"添加到主屏幕"，由 manifest 的 orientation:"landscape" 生效。
+      window.__FSL.lock = "unsupported";
+      toast("iPhone 不支持网页自动横屏：请手动横过来，或用「添加到主屏幕」安装后自动横屏", 4200);
+      return;
+    }
+    function attempt(n) {
       try {
         var r = so.lock("landscape");
-        if (r && r.catch) r.catch(function () { toast("自动横屏被系统拒绝，请手动把手机横过来", 2800); });
+        window.__FSL.lock = "requested";
+        if (r && r.catch) r.catch(function (err) {
+          window.__FSL.lock = "rejected:" + (err && err.name ? err.name : "?");
+          if (n > 0) setTimeout(function () { attempt(n - 1); }, 260);
+          else toast("自动横屏被系统拒绝（部分机型需先在系统里打开「自动旋转」），请手动横过来", 3600);
+        });
       } catch (e) {
-        toast("本机不支持自动横屏，请手动把手机横过来", 2800);
+        window.__FSL.lock = "threw";
+        if (n > 0) setTimeout(function () { attempt(n - 1); }, 260);
+        else toast("本机不支持自动横屏，请手动把手机横过来", 3200);
       }
     }
-    setTimeout(tryLock, 200);
+    attempt(left);
+  }
+  /**
+   * 全屏 + 锁定横屏。
+   * ⚠ 这里**必须直接调 requestFullscreen()，不能再走 tapKey("KeyF")**：
+   * 游戏的 F 键是 toggle，用户如果已经是全屏（先按过一次全屏、或系统本来就全屏），
+   * 再点「全屏并横屏」会被 toggle 成**退出全屏**，然后 lock() 因为不在全屏而失败 ——
+   * 现象就是"点了全屏并横屏，结果既没全屏也没横屏"。
+   * 直连调用还会把 navigationUI:"hide" 一起带上（安卓地址栏不再占高度）。
+   */
+  function goFullscreenLandscape() {
+    window.__FSL = { requested: true, lock: null };
+    var el = document.documentElement;
+    var already = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    if (already) {
+      window.__FSL.fs = "already";
+      setTimeout(function () { tryLockOrientation(); }, 60);
+      return;
+    }
+    var p = null;
+    try {
+      var req = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (req) p = req.call(el, { navigationUI: "hide" });
+    } catch (e) {
+      p = null;
+    }
+    if (p && p.then) {
+      p.then(function () {
+        window.__FSL.fs = "ok";
+        setTimeout(function () { tryLockOrientation(); }, 120);
+      }).catch(function (e) {
+        // 直连被拒（Permissions check failed / WebView 限制）：退回游戏自身的 F 键路径再试一次
+        window.__FSL.fs = "rejected:" + (e && e.name ? e.name : "?");
+        tapKey("KeyF");
+        setTimeout(function () { tryLockOrientation(); }, 520);
+      });
+    } else {
+      // 老实现（同步返回 undefined）：轮询等全屏生效
+      tapKey("KeyF");
+      var tries = 0;
+      (function wait() {
+        tries++;
+        if (!(document.fullscreenElement || document.webkitFullscreenElement) && tries < 14) { setTimeout(wait, 150); return; }
+        window.__FSL.fs = "ok";
+        tryLockOrientation();
+      })();
+    }
   }
   function utilAction(act, el) {
     switch (act) {
@@ -57225,7 +57291,15 @@ var MOBILE = (function () {
       lookPointers.length = 0;
     }));
     window.addEventListener("resize", safe(onViewportChange));
-    window.addEventListener("orientationchange", safe(function () { setTimeout(safe(onViewportChange), 220); }));
+    window.addEventListener("orientationchange", safe(function () {
+      setTimeout(safe(onViewportChange), 220);
+      // 全屏状态下跨过 90° 之后系统有时会解除锁定，这里补一次
+      if (window.__FSL && window.__FSL.lock === "requested") setTimeout(safe(function () { tryLockOrientation(1); }), 400);
+    }));
+    // 切回前台时（手机锁屏/切 App 回来）系统会重置方向锁定，同样补一次
+    document.addEventListener("visibilitychange", safe(function () {
+      if (!document.hidden && window.__FSL && window.__FSL.lock === "requested") setTimeout(safe(function () { tryLockOrientation(1); }), 300);
+    }));
     // 手机上切后台 = 自动暂停，回来不会发现自己已经死了
     document.addEventListener("visibilitychange", safe(function () {
       if (QS.get("autopause") === "0") return;

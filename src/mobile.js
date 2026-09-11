@@ -485,23 +485,83 @@ var MOBILE = (function () {
    *  2. lock() 返回 Promise，被拒时原来静默吞掉，用户只觉得"点了没反应" → 现在明确提示。
    *  3. iOS Safari 根本没有 orientation.lock → 同样给提示，而不是假装成功。
    */
-  function goFullscreenLandscape() {
-    tapKey("KeyF");   // 游戏自己的键位：F = 全屏
-    var tries = 0;
-    function tryLock() {
-      tries++;
-      var fs = !!(document.fullscreenElement || document.webkitFullscreenElement);
-      if (!fs && tries < 14) { setTimeout(tryLock, 150); return; }
-      var so = screen.orientation;
-      if (!so || !so.lock) { toast("本机不支持自动横屏，请手动把手机横过来", 2800); return; }
+  /**
+   * 锁横屏。等到全屏真正生效后再调（非全屏状态下 lock() 必被拒），
+   * 失败重试 2 次（部分机型第一次 lock 会因为切换动画还没结束而失败）。
+   */
+  function tryLockOrientation(retry) {
+    var left = retry === void 0 ? 2 : retry;
+    window.__FSL = window.__FSL || {};
+    var so = screen.orientation;
+    if (!so || !so.lock) {
+      // iOS Safari 至今没有 Screen Orientation API（只有 Android Chrome / 三星浏览器支持）。
+      // 唯一能让 iPhone 自动横屏的办法是"添加到主屏幕"，由 manifest 的 orientation:"landscape" 生效。
+      window.__FSL.lock = "unsupported";
+      toast("iPhone 不支持网页自动横屏：请手动横过来，或用「添加到主屏幕」安装后自动横屏", 4200);
+      return;
+    }
+    function attempt(n) {
       try {
         var r = so.lock("landscape");
-        if (r && r.catch) r.catch(function () { toast("自动横屏被系统拒绝，请手动把手机横过来", 2800); });
+        window.__FSL.lock = "requested";
+        if (r && r.catch) r.catch(function (err) {
+          window.__FSL.lock = "rejected:" + (err && err.name ? err.name : "?");
+          if (n > 0) setTimeout(function () { attempt(n - 1); }, 260);
+          else toast("自动横屏被系统拒绝（部分机型需先在系统里打开「自动旋转」），请手动横过来", 3600);
+        });
       } catch (e) {
-        toast("本机不支持自动横屏，请手动把手机横过来", 2800);
+        window.__FSL.lock = "threw";
+        if (n > 0) setTimeout(function () { attempt(n - 1); }, 260);
+        else toast("本机不支持自动横屏，请手动把手机横过来", 3200);
       }
     }
-    setTimeout(tryLock, 200);
+    attempt(left);
+  }
+  /**
+   * 全屏 + 锁定横屏。
+   * ⚠ 这里**必须直接调 requestFullscreen()，不能再走 tapKey("KeyF")**：
+   * 游戏的 F 键是 toggle，用户如果已经是全屏（先按过一次全屏、或系统本来就全屏），
+   * 再点「全屏并横屏」会被 toggle 成**退出全屏**，然后 lock() 因为不在全屏而失败 ——
+   * 现象就是"点了全屏并横屏，结果既没全屏也没横屏"。
+   * 直连调用还会把 navigationUI:"hide" 一起带上（安卓地址栏不再占高度）。
+   */
+  function goFullscreenLandscape() {
+    window.__FSL = { requested: true, lock: null };
+    var el = document.documentElement;
+    var already = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    if (already) {
+      window.__FSL.fs = "already";
+      setTimeout(function () { tryLockOrientation(); }, 60);
+      return;
+    }
+    var p = null;
+    try {
+      var req = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (req) p = req.call(el, { navigationUI: "hide" });
+    } catch (e) {
+      p = null;
+    }
+    if (p && p.then) {
+      p.then(function () {
+        window.__FSL.fs = "ok";
+        setTimeout(function () { tryLockOrientation(); }, 120);
+      }).catch(function (e) {
+        // 直连被拒（Permissions check failed / WebView 限制）：退回游戏自身的 F 键路径再试一次
+        window.__FSL.fs = "rejected:" + (e && e.name ? e.name : "?");
+        tapKey("KeyF");
+        setTimeout(function () { tryLockOrientation(); }, 520);
+      });
+    } else {
+      // 老实现（同步返回 undefined）：轮询等全屏生效
+      tapKey("KeyF");
+      var tries = 0;
+      (function wait() {
+        tries++;
+        if (!(document.fullscreenElement || document.webkitFullscreenElement) && tries < 14) { setTimeout(wait, 150); return; }
+        window.__FSL.fs = "ok";
+        tryLockOrientation();
+      })();
+    }
   }
   function utilAction(act, el) {
     switch (act) {
@@ -751,7 +811,15 @@ var MOBILE = (function () {
       lookPointers.length = 0;
     }));
     window.addEventListener("resize", safe(onViewportChange));
-    window.addEventListener("orientationchange", safe(function () { setTimeout(safe(onViewportChange), 220); }));
+    window.addEventListener("orientationchange", safe(function () {
+      setTimeout(safe(onViewportChange), 220);
+      // 全屏状态下跨过 90° 之后系统有时会解除锁定，这里补一次
+      if (window.__FSL && window.__FSL.lock === "requested") setTimeout(safe(function () { tryLockOrientation(1); }), 400);
+    }));
+    // 切回前台时（手机锁屏/切 App 回来）系统会重置方向锁定，同样补一次
+    document.addEventListener("visibilitychange", safe(function () {
+      if (!document.hidden && window.__FSL && window.__FSL.lock === "requested") setTimeout(safe(function () { tryLockOrientation(1); }), 300);
+    }));
     // 手机上切后台 = 自动暂停，回来不会发现自己已经死了
     document.addEventListener("visibilitychange", safe(function () {
       if (QS.get("autopause") === "0") return;
