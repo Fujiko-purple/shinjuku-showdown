@@ -2426,7 +2426,20 @@
           const wlen = Math.hypot(wmx, wmz);
           if (wlen > 1e-6) { mx = wmx / wlen; mz = wmz / wlen; }
         }
-        const sp = inp.dash ? TUNE.DASH_SPEED : TUNE.MOVE_SPEED;
+        /**
+         * 出招期间必须把移动速度压下来。
+         * 不然玩家按住方向键连打时，角色会以走/跑的全速（4.8 m/s）"滑行"，
+         * 腿上却停在出拳/踢腿的姿势里一动不动 —— 模糊测试实测到
+         * "1 秒内滑行 3.4 米、大腿摆幅 0.09 rad"，这就是用户反复说的
+         * "打起来动作僵硬、肢体和操作不契合"。压到 18%~45% 之后仍然能贴身追打，
+         * 但视觉上变成了"招式锁住重心"的正常动作游戏手感。
+         */
+        const actNow = pl.action;
+        let moveMul = 1;
+        if (actNow && !actNow.done) {
+          moveMul = actNow.phase === "active" ? 0.18 : actNow.phase === "recover" ? 0.45 : 0.32;
+        }
+        const sp = (inp.dash ? TUNE.DASH_SPEED : TUNE.MOVE_SPEED) * moveMul;
         pl.ctrl.moveTowards(pl.p.x + mx * 14, pl.p.z + mz * 14, sp, dt);
         pl.moveIntent.set(mx, 0, mz);
         if (inp.dash && Math.random() < 0.08) audio2.play("dash", { volume: 0.3 });

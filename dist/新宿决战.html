@@ -50210,6 +50210,17 @@ void main(){
   // 播完必须保持末帧的动作（倒地 / 胜负姿势）。其余一次性动作播完要自动回到基础动作，
   // 否则调用方在攻击 / 受击 / 技能之后没有接手新动作时，角色会永远僵在最后一帧。
   var HOLD_AFTER_END = { down: 1, defeat: 1, victory: 1 };
+  /**
+   * 循环动作里真正要"锁住姿势、不许走跑接管"的白名单。
+   *
+   * ⚠ 这里**故意是空的**：`guard_infinity`（无下限 / 闪避的防御姿势）一开始被我放进来，
+   * 结果模糊测试抓到"角色一边以 4 m/s 滑行 2.6 米、一边保持防御姿势不动"，
+   * 大腿摆幅只有 0.09 rad —— 正是用户说的"点了闪避之后动作僵硬不变"。
+   * 防御姿势本身是循环动作，而它要等 INFINITY_TIME 结束才被 setGuard(false) 收掉，
+   * 这段时间玩家是可以自由移动的，所以"能走就必须让走跑接管"。
+   * 防御的护盾/光环由 guardOn 驱动，不依赖骨骼姿势，接管动画不会丢视觉。
+   */
+  var HOLD_LOOP = {};
   var animSpeed = (name) => name === "run" ? 0.72 : name === "walk" ? 0.95 : name === "idle" ? 2.6 : 1.15;
   var OVERRIDES = {
     gojo: {
@@ -50377,6 +50388,7 @@ void main(){
     let vX = 0, vZ = 0;            // 当前水平速度 m/s
     let prevSpd = 0;               // 上一帧速率（算加速度 → 前后倾）
     let cmdMove = false;           // 本帧是否收到移动指令
+    let gaitCd = 0;                // 步态切换冷却：防止 wantAnim 在阈值附近抖动导致每帧重起手
     let turnVel = 0;               // 转身角速度 rad/s
     let leanRoll = 0;              // 转弯侧倾
     let leanPitch = 0;             // 加减速前后倾
@@ -50646,7 +50658,13 @@ void main(){
       const opt = o || {};
       if (!sampler.has(name)) return;
       const loop3 = opt.loop !== void 0 ? !!opt.loop : ONESHOT[name] === void 0;
-      if (name === curName && loop3) {
+      /**
+       * ⚠ 早退条件必须带上 curLoop：同一个动作名可能先用 loop:false 播（一次性起手），
+       * 再被要求 loop:true（持续状态）。只看 loop3 就早退的话，curLoop 会**永远留在 false**，
+       * 结果这个"应该一直循环"的动作播到 dur 就停住 —— 走/跑的动画卡在最后一帧不动，
+       * 正是"点了疾跑之后动作僵硬不变"。
+       */
+      if (name === curName && loop3 && curLoop) {
         curSpeed = (opt.speed !== void 0 ? opt.speed : 1) * animSpeed(name);
         return;
       }
@@ -50721,11 +50739,39 @@ void main(){
       // 否则 move() 会因为 curName 仍是 punch/hit_light 而拒绝切回走跑，
       // 于是"边走边滑、腿一步不摆"。
       const oneShotDone = !curLoop && ended && !HOLD_AFTER_END[curName];
-      if (curName === "idle" || curName === "walk" || curName === "run" || oneShotDone) {
+      // 循环中的"非步态"动作（防御姿势、蓄力等）也应该能被走跑接管，
+      // 否则只要有一个循环动作没人负责收尾，角色就会一边滑一边保持那个姿势。
+      // HOLD_LOOP 里的动作是真正需要玩家保持姿势的，不抢。
+      const loopingForeign = curLoop && curName !== "idle" && curName !== "walk" && curName !== "run" && !HOLD_LOOP[curName];
+      if (curName === "idle" || curName === "walk" || curName === "run" || oneShotDone || loopingForeign) {
         // 用"实际速度"驱动动画，起步时会自然经过 idle → walk → run
         const spd = Math.max(sp, want * 0.55);
-        const wantAnim = spd >= RUN_SPEED * 0.8 ? "run" : spd >= WALK_SPEED * 0.5 ? "walk" : "idle";
-        if (wantAnim !== curName) play2(wantAnim, { loop: true });
+        let wantAnim = spd >= RUN_SPEED * 0.8 ? "run" : spd >= WALK_SPEED * 0.5 ? "walk" : "idle";
+        /**
+         * 兜底：只要这一帧确实收到了移动指令（能走到这里就说明有输入），就**至少播走**。
+         * 之前 wantAnim 会因为速度阈值/降速系数掉到 "idle"，于是角色以站姿在地面上滑行 ——
+         * 实测抓到过 1.4 秒的窗口（用户原话："动作僵硬不变"）。
+         * 出招期间不会受影响：那时候 curName 是招式动作，上面的守卫已经拦住了。
+         */
+        if (wantAnim === "idle" && want > 0.05) wantAnim = "walk";
+        /**
+         * ⚠ 换步态必须有稳定期（0.1s），不能一帧一换。
+         * play2() 每次换名字都会把 curT 和 blendT 归零，如果 wantAnim 在阈值附近来回跳
+         * （实测：出招降速后 want 在 1.6~4.0 之间摆动），就会变成"每帧重新起手"——
+         * 混合权重永远停在 0，骨骼几乎不动，看起来就是**动作僵硬不变**。
+         */
+        /**
+         * 用"切换冷却"而不是"目标稳定计时"来防抖。
+         * 上一版写成 gaitHold += dt 直到 0.1s 才切，结果 wantAnim 在阈值附近
+         * 一帧 walk 一帧 idle 地抖时，gaitHold 每帧都被 else 分支清零，
+         * 永远攒不到 0.1s —— 死锁，角色就以 idle 姿势滑行（实测抓到 0.7 秒的窗口）。
+         * 冷却制不会死锁：最多 0.12s 切一次，且不需要目标连续稳定。
+         */
+        if (gaitCd > 0) gaitCd -= Math.max(dt, 1e-4);
+        if (wantAnim !== curName && gaitCd <= 0) {
+          play2(wantAnim, { loop: true });
+          gaitCd = 0.12;
+        }
       }
       return step;
     };
@@ -50746,7 +50792,13 @@ void main(){
     const setGuard = (on) => {
       guardOn = !!on;
       applyAuraMats();
-      if (guardOn) play2("guard_infinity", { loop: true, speed: 0.9 });
+      if (guardOn) {
+        play2("guard_infinity", { loop: true, speed: 0.9 });
+      } else if (curName === "guard_infinity" || curName === "block" || curName === "block_hit") {
+        // 关掉防御时必须把姿势收回去：guard_infinity 是循环动作，
+        // 不主动切走的话角色会一直保持防御姿势，移动时表现为"滑着走、腿不摆"。
+        play2("idle", { loop: true });
+      }
     };
     const setAura = (on) => {
       auraOn = !!on;
@@ -53316,7 +53368,20 @@ void main(){
           const wlen = Math.hypot(wmx, wmz);
           if (wlen > 1e-6) { mx = wmx / wlen; mz = wmz / wlen; }
         }
-        const sp = inp.dash ? TUNE.DASH_SPEED : TUNE.MOVE_SPEED;
+        /**
+         * 出招期间必须把移动速度压下来。
+         * 不然玩家按住方向键连打时，角色会以走/跑的全速（4.8 m/s）"滑行"，
+         * 腿上却停在出拳/踢腿的姿势里一动不动 —— 模糊测试实测到
+         * "1 秒内滑行 3.4 米、大腿摆幅 0.09 rad"，这就是用户反复说的
+         * "打起来动作僵硬、肢体和操作不契合"。压到 18%~45% 之后仍然能贴身追打，
+         * 但视觉上变成了"招式锁住重心"的正常动作游戏手感。
+         */
+        const actNow = pl.action;
+        let moveMul = 1;
+        if (actNow && !actNow.done) {
+          moveMul = actNow.phase === "active" ? 0.18 : actNow.phase === "recover" ? 0.45 : 0.32;
+        }
+        const sp = (inp.dash ? TUNE.DASH_SPEED : TUNE.MOVE_SPEED) * moveMul;
         pl.ctrl.moveTowards(pl.p.x + mx * 14, pl.p.z + mz * 14, sp, dt);
         pl.moveIntent.set(mx, 0, mz);
         if (inp.dash && Math.random() < 0.08) audio2.play("dash", { volume: 0.3 });
