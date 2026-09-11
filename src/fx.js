@@ -2669,6 +2669,23 @@ void main() {
             u.pos.z + jitter * 0.6
           );
         }
+        /**
+         * 屏幕顶部安全区。
+         * 「黑闪 / BLACK FLASH」这类大字原来锚在角色头顶，角色一旦走到画面上缘
+         * （低俯角镜头 + 贴身走位），大字就会顶到顶部的计时器与血条上，
+         * 实测截图中 "BLACK FLASH" 直接压住 "00:05"，两边都读不出来。
+         * 这里每帧把已经越过安全线的 callout 沿**世界 Y**拉回来：
+         * NDC 每 1.0 对应 tanHalf*d 的世界高度，再用相机前向的水平分量折算俯角。
+         */
+        const SAFE_NDC_Y = 0.46;
+        if (!u.anchored) {
+          const mw = cam2.matrixWorld.elements;
+          const horiz = Math.max(0.35, Math.hypot(mw[8], mw[10]));
+          _v12.copy(u.sprite.position).project(cam2);
+          if (_v12.z < 1 && _v12.y > SAFE_NDC_Y) {
+            u.sprite.position.y -= (_v12.y - SAFE_NDC_Y) * tanHalf * d / horiz;
+          }
+        }
         const h = 2 * tanHalf * d;
         const pop = k < 0.16 ? 0.35 + 4.2 * k : 1 + 0.1 * Math.exp(-(k - 0.16) * 12);
         const frac = clamp3(u.size * 0.115, 0.03, 0.26);
