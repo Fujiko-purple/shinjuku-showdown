@@ -3081,6 +3081,9 @@
     victory: "easeOut",
     defeat: "easeOut"
   };
+  // 播完必须保持末帧的动作（倒地 / 胜负姿势）。其余一次性动作播完要自动回到基础动作，
+  // 否则调用方在攻击 / 受击 / 技能之后没有接手新动作时，角色会永远僵在最后一帧。
+  var HOLD_AFTER_END = { down: 1, defeat: 1, victory: 1 };
   var animSpeed = (name) => name === "run" ? 0.72 : name === "walk" ? 0.95 : name === "idle" ? 2.6 : 1.15;
   var OVERRIDES = {
     gojo: {
@@ -3305,6 +3308,7 @@
         curT = dur;
         if (!ended) {
           ended = true;
+          const finishedName = curName;
           const cb = onEndCb;
           onEndCb = null;
           if (cb) {
@@ -3312,6 +3316,13 @@
               cb();
             } catch (e) {
             }
+          }
+          // 关键兜底：回调里没有人接手新动作时，主动回到 idle。
+          // 攻击 / 技能 / 受击的调用方经常直接 return（不等 onEnd），
+          // 缺了这一步角色就会一直卡在出拳或受击的最后一帧：
+          // 表现为"打完之后僵住不动""移动时腿不摆动像个木偶"。
+          if (curName === finishedName && !HOLD_AFTER_END[curName]) {
+            play2("idle", { loop: true });
           }
         }
       }
@@ -3571,7 +3582,11 @@
       }
       faceTo(x, z, false);
       cmdMove = true;
-      if (curName === "idle" || curName === "walk" || curName === "run") {
+      // 一次性动作已经播完（且不是需要保持末帧的姿势）时也要允许接管，
+      // 否则 move() 会因为 curName 仍是 punch/hit_light 而拒绝切回走跑，
+      // 于是"边走边滑、腿一步不摆"。
+      const oneShotDone = !curLoop && ended && !HOLD_AFTER_END[curName];
+      if (curName === "idle" || curName === "walk" || curName === "run" || oneShotDone) {
         // 用"实际速度"驱动动画，起步时会自然经过 idle → walk → run
         const spd = Math.max(sp, want * 0.55);
         const wantAnim = spd >= RUN_SPEED * 0.8 ? "run" : spd >= WALK_SPEED * 0.5 ? "walk" : "idle";
