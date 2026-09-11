@@ -1,0 +1,21 @@
+<script>
+/* --- Service Worker 注册（站点版专用）-------------------------------------
+   目的：静态资源不重复下载 + 断网后仍能进入游戏。
+   为什么单独一个片段而不是塞进 lazy-audio.html：
+     两者职责不同 —— 一个是音频懒加载，一个是缓存策略，混在一起以后不好改。
+   为什么整体 try/catch 且只在 http(s) 下注册：
+     file:// 打开时浏览器会直接拒绝注册 SW；SW 只是增强项，
+     注册失败绝不允许影响游戏本身，更不能污染控制台报错。
+   ------------------------------------------------------------------------- */
+(function () {
+  if (!('serviceWorker' in navigator)) return;
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js', { scope: './' }).catch(function (e) {
+      if (window.console && console.info) {
+        console.info('[新宿决战] Service Worker 未注册（不影响游戏）:', e && e.message);
+      }
+    });
+  });
+})();
+</script>

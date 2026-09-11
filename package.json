@@ -1,0 +1,13 @@
+{
+  "name": "shinjuku-showdown",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "新宿决战 · 五条悟 VS 宿傩 —— 单文件 3D 格斗同人作品",
+  "scripts": {
+    "build": "node build/build.mjs",
+    "extract": "node _tools/extract.mjs",
+    "diag": "node _tools/diag.mjs",
+    "play": "node _tools/play.mjs"
+  }
+}

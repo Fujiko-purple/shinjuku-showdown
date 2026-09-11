@@ -1,0 +1,27 @@
+<script>
+/* --- BGM 懒加载（站点版专用）：首屏绝不拉 2.7MB 音频，首次真实交互才请求 ---- */
+(function () {
+  var el = document.getElementById('bgm');
+  if (!el || !el.dataset || !el.dataset.src) return;
+  var done = false;
+  /*
+     职责收敛：这里只负责「尽早把 src 挂上，让 2.76MB 音频开始下载」，**不负责播放**。
+     播放统一交给 main.js 的 startBGM（它在冒泡阶段跑，并且带失败重试）。
+     之前这里也调 play()，两处逻辑重复且失败处理不一致，真出问题时分不清是谁没出声。
+  */
+  function go() {
+    if (done) return; done = true;
+    window.removeEventListener('pointerdown', go, true);
+    window.removeEventListener('keydown', go, true);
+    window.removeEventListener('touchstart', go, true);
+    window.removeEventListener('click', go, true);
+    el.src = el.dataset.src;
+  }
+  /* 捕获阶段 → 一定早于 main.js 的 startBGM（冒泡阶段），先一步开始下载 */
+  window.addEventListener('pointerdown', go, true);
+  window.addEventListener('touchstart', go, true);
+  window.addEventListener('keydown', go, true);
+  window.addEventListener('click', go, true);
+  window.__BGM_LAZY = { get loaded() { return !!el.getAttribute('src'); }, get playing() { return !el.paused; } };
+})();
+</script>

@@ -1,0 +1,14 @@
+import { Browser, sleep } from '../cdp.mjs';
+import { resolve } from 'node:path';
+const b = new Browser({ port: 9351, width: 640, height: 360 });
+await b.launch(); await b.newPage();
+const p = resolve('_tools/_gen/artview.html');
+const url = 'file:///' + p.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
+await b.send('Page.navigate', { url });
+await sleep(2500);
+await b.evaluate('window.VIEW.apply(' + JSON.stringify({ who: "gojo", quality: "high", anim: "idle", t: 0.5, az: 0, dist: 3, ty: 1 }) + ')');
+console.log('gojo', JSON.stringify(await b.evaluate('window.VIEW.mat("gojo")')));
+await b.evaluate('window.VIEW.apply(' + JSON.stringify({ who: "sukuna", quality: "high", anim: "idle", t: 0.5, az: 0, dist: 3, ty: 1 }) + ')');
+console.log('sukuna', JSON.stringify(await b.evaluate('window.VIEW.mat("sukuna")')));
+console.log('errs', JSON.stringify(b.errors.slice(0,3)));
+await b.close();

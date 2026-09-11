@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="BCeVMiSr55nHtThuCGIj3W">
+<head data-page-node-id="m2yTncDVpIpeA69Sz6zjR4">
+<meta charset="utf-8" data-page-node-id="9J1awe6J2E9sMlp2OOhamB">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" data-page-node-id="WPilFWHX3HtIcNdNnGakSk">
+<meta name="theme-color" content="#06060c" data-page-node-id="SZIjCZnVHu8ikY3cQtZyqz">
+<!-- 单文件构建：全部 JS/CSS 已内联，可直接双击打开 -->
+<title>新宿决战 · 五条悟 VS 宿傩</title>
+<!-- 内联 favicon，省掉一次 404 请求 -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%2306060c'/%3E%3Ccircle cx='32' cy='32' r='16' fill='none' stroke='%23b04cff' stroke-width='4'/%3E%3Ccircle cx='32' cy='32' r='6' fill='%235ff0ff'/%3E%3C/svg%3E" data-page-node-id="KZbTNzKAFiCz5eaylBHC9L">
+<!-- ============================ PWA / 移动端 ============================ -->
+<meta name="description" content="非商业同人 3D 格斗：五条悟 VS 宿傩，新宿决战。手机浏览器直接开玩，支持触屏。">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="新宿决战">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta property="og:title" content="新宿决战 · 五条悟 VS 宿傩">
+<meta property="og:description" content="非商业同人 3D 格斗，手机浏览器直接开玩">
+<meta property="og:type" content="website">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="stylesheet" href="assets/mobile.css">
+</head>
+<body data-page-node-id="mR1de3CcSmIzeR49QE5jmx">
+<script>window.__SS_SINGLE_FILE = false;</script>
+
+<!-- ============================ 背景音乐 ============================
+     整轨配乐，首次交互后自动循环播放（浏览器不允许无交互自动播放）。
+     音量跟随 HUD 的「乐」滑块。单文件构建会把音频内联成 data URI。 -->
+<audio id="bgm" loop preload="auto" preload="none" data-src="assets/bgm.m4a" data-page-node-id="OKB9c9x90LeoUhyXOsewad"></audio>
+
+<!-- ============================ 3D 画布 ============================ -->
+<canvas id="gl" aria-label="新宿决战 3D 战场" data-page-node-id="1TAeXaBdbW0XewyZxIYRQD"></canvas>
+
+<!-- ============================ HUD ============================ -->
+<div id="hud" class="hidden" aria-hidden="true" data-page-node-id="n91L9OSgLxWKFeGtHdRGW5">
+
+  <!-- 打击闪光 / 濒死红边：刻意排在所有 HUD 内容之前并压到最低层级，
+       保证任何情况下都不可能盖住血条、计时、技能栏（Lead 验收要求） -->
+  <div id="flash" class="flash"></div>
+  <div id="lowhp" class="lowhp"></div>
+
+  <!-- 电影黑边（播片 / 领域对撞时出现） -->
+  <div class="bar bar-top" data-page-node-id="QSDFZmXXmdgym7xdx7xvlD"></div>
+  <div class="bar bar-bottom" data-page-node-id="IV9i6iEL9JmynZqKEPDTrV"></div>
+
+  <!-- 顶部：双方状态 -->
+  <div class="top-strip" data-page-node-id="iqEeh3B7ckrRn5GDlxI96v">
+    <!-- 五条悟（玩家）：血条 > 咒力 > 领域，数值直接标在条右侧 -->
+    <div class="fighter-panel left" data-page-node-id="SVRnHUEH8exgyGIZ6uEI48">
+      <div class="fp-head">
+        <span class="fp-side">呪術師</span>
+        <span class="fp-name" data-page-node-id="h55mt1fwYbFoyRaV7L3No3"><span class="jp" data-page-node-id="1rNxmiwl22YsJo66YFDUgC">五条 悟</span><span class="en" data-page-node-id="HHZbaVOKCQrvFfzo1zJE3d">GOJO SATORU</span></span>
+        <span id="hp-gojo-num" class="hp-num">1500</span>
+      </div>
+      <div class="hp-wrap" data-page-node-id="20kWfJ3DJ2ZXbKM9dq5Ige">
+        <div class="hp-bar" data-page-node-id="CIoEt1b3fPytTKatgRuxEo"><i id="hp-gojo" class="hp-fill gojo" data-page-node-id="XpAMwGzKFrp0rFvQhRXbFm"></i></div>
+        <div class="hp-bar ghost" data-page-node-id="Izt48M3zHayBPGCiNIPGb0"><i id="hp-gojo-ghost" class="hp-ghost" data-page-node-id="fsMw05i87IJBE2udXN0rAx"></i></div>
+        <div class="stat-row">
+          <span class="stat-label">咒力</span>
+          <div class="tech-bar" data-page-node-id="h6Eb7bxG0vNzn3U9LrS5M0"><i id="tech-gojo" class="tech-fill gojo" data-page-node-id="eiWgqssdYlFvzlRKDPB2Kj"></i></div>
+          <span id="ce-gojo-num" class="stat-num">0%</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">领域</span>
+          <div class="dom-bar" data-page-node-id="Ukguy31FFuCNE4lZcJumCC"><i id="dom-gojo" class="dom-fill gojo" data-page-node-id="LB42rvKeMppGdvrP9cUMcN"></i></div>
+          <span id="dom-gojo-num" class="stat-num">0%</span>
+        </div>
+      </div>
+      <div id="burnout-gojo" class="burnout hidden" data-page-node-id="Jpib3zcLlkJ51xBZODXEKI">术式熔断</div>
+    </div>
+
+    <!-- 中央：真在走的计时器 / 阶段 / 距离 / 连击（整列都贴在画面顶部，不占战斗区） -->
+    <div class="center-readout" data-page-node-id="bdTMmIp0Q9KkymTPbBFGqd">
+      <div id="timer" class="timer off" data-page-node-id="yNu8k0OKbfK8iJoAHCjf0E">00:00</div>
+      <div class="center-sub">
+        <span id="phase-tag" class="phase-tag ph1" data-page-node-id="ePe9j8GdHilfHxBUUuVBZP">宿傩 · 第一形态</span>
+        <span id="focus-dist" class="focus-dist mid">--</span>
+      </div>
+      <div id="combo" class="combo hidden" data-page-node-id="hdy19UassVa0cMnEDW05wM"><b data-page-node-id="Cb74yBf0wCxwq01oNQgjFa">0</b><span data-page-node-id="vEHK45cOUnWvsdTdJ3GQlY">连击</span></div>
+    </div>
+
+    <!-- 宿傩（敌方）：名字与数值镜像到右侧 -->
+    <div class="fighter-panel right" data-page-node-id="91FOKYHFYXAuGD68cdbHX6">
+      <div class="fp-head">
+        <span id="hp-sukuna-num" class="hp-num">1800</span>
+        <span class="fp-name" data-page-node-id="cVwGab5W21OveTZPcHjlFC"><span class="jp" data-page-node-id="gAHoP9Y0eMeisDRMs2hChL">宿 儺</span><span class="en" data-page-node-id="0Umasru17MBAuOhyGL38Ac">RYOMEN SUKUNA</span></span>
+        <span class="fp-side">呪霊</span>
+      </div>
+      <div class="hp-wrap" data-page-node-id="wBLTbZGCLpQi54epVEg9MK">
+        <div class="hp-bar" data-page-node-id="wyXhWhdLnKrjish2Ew47iM"><i id="hp-sukuna" class="hp-fill sukuna" data-page-node-id="zPa2tVUJ5qbMWj7VRfbNVZ"></i></div>
+        <div class="hp-bar ghost" data-page-node-id="v0kK0A5bJ4lls5wYvB90hU"><i id="hp-sukuna-ghost" class="hp-ghost" data-page-node-id="QU1AmVfTjFFtL7eG9tzpwk"></i></div>
+        <div class="stat-row">
+          <span id="dom-sukuna-num" class="stat-num">0%</span>
+          <div class="dom-bar" data-page-node-id="v3B50LtgdXxI6xbCdibB9p"><i id="dom-sukuna" class="dom-fill sukuna" data-page-node-id="RLK57F10l4GO1olBDz1HNm"></i></div>
+          <span class="stat-label">领域</span>
+        </div>
+      </div>
+      <div id="wheel" class="wheel hidden" data-page-node-id="dpeEYzEAmX8BCGd5dAJTyl">
+        <span class="wheel-label" data-page-node-id="Vc1FLMFyjbdhZfG8RLLYeM">摩虚罗之轮</span>
+        <div class="wheel-dots" data-page-node-id="8aSJc69FFdeM4fZf4FL831"><i data-page-node-id="XMdp4vFSoJ4ejlGKH6ZuO3"></i><i data-page-node-id="I5IQtuFDtey7o2wxlkKjpg"></i><i data-page-node-id="lP1cWVnJrIGcmnjsb6L8BP"></i><i data-page-node-id="EvD099HeAIRSHmVtK9aMB1"></i><i data-page-node-id="U5hMfZblTZXXHAlSDEfahR"></i><i data-page-node-id="TFpbL15D3nIoeIIr39cbD5"></i><i data-page-node-id="QHuwwL54FXmxi5R3O7z2z1"></i><i data-page-node-id="9jKuYdbxJkS74HeEr1mNvF"></i></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 离屏敌人指示：宿傩跑到画面外时贴在屏幕边缘，箭头指向他并标出距离 -->
+  <div id="enemy-compass" class="enemy-compass hidden">
+    <span id="ec-arrow" class="ec-arrow">▶</span>
+    <span id="ec-dist" class="ec-dist">0m</span>
+  </div>
+
+  <!-- 技能栏（内容由 main.js 的 buildAbilityBar 生成，hud.js 补冷却环与就绪反馈） -->
+  <div id="ability-bar" class="ability-bar" data-page-node-id="ilJUJxEqCQqTJL0TuB6q5x"></div>
+
+  <!-- 领域拉锯 -->
+  <div id="clash" class="clash hidden" data-page-node-id="GTGNLjzEnsZA9fAD82ADFB">
+    <div class="clash-title" data-page-node-id="3FCy1BeoNxlbCyTVZUfIRL">領 域 対 決</div>
+    <div class="clash-track" data-page-node-id="ssqBt9X1mZfyWYDU8T3Qz9">
+      <i id="clash-fill-gojo" class="clash-side gojo" data-page-node-id="5UFA6lIZ9rHU6ocO3gqvVd"></i>
+      <i id="clash-fill-sukuna" class="clash-side sukuna" data-page-node-id="ilWC61WFBnnMe4llPFP6Eg"></i>
+      <div id="clash-pin" class="clash-pin" data-page-node-id="brnMg9X1echJrX74GYIexu"></div>
+    </div>
+    <div class="clash-hint" data-page-node-id="dyQn9qboQFyo3s7ECdv2UV">连点 <b data-page-node-id="JZ6Wn5BwkTXclr7H0cCQ2T">J</b> / <b data-page-node-id="dwkmUGC8A5JNrPv88ILyys">K</b> 压制宿傩的领域</div>
+  </div>
+
+  <!-- 中央提示条 -->
+  <div id="banner" class="banner" data-page-node-id="xTQVs4HC83WlxGv44soEHN"></div>
+
+  <!-- 教学提示 -->
+  <div id="hints" class="hints" data-page-node-id="ueHVbgwQeG2zlONScC7MJK"></div>
+
+  <!-- 播片字幕 -->
+  <div id="caption" class="caption hidden" data-page-node-id="gR9eE5uJjrVJvicQv9RDBZ">
+    <div class="cap-main" data-page-node-id="4y57dWljP4WjH3ssRJmREN"></div>
+    <div class="cap-sub" data-page-node-id="9D0Pryq8co0WfVAdNf6P33"></div>
+  </div>
+
+  <!-- 播片进度 / 跳过 -->
+  <div id="cine-ui" class="cine-ui hidden" data-page-node-id="aEGHafrZK8x84YlJzhzZQG">
+    <div class="cine-progress" data-page-node-id="tdPF5kRNW9QQCkG5T0Fd4t"><i id="cine-bar" data-page-node-id="NDpRkjUvWZQPJl6YDBZVgF"></i></div>
+    <div class="cine-skip" data-page-node-id="b2rRmDhOUI7wmaELCAnEa3">按 <b data-page-node-id="jvIyzF1CaYFsaEAA1Brx8J">空格</b> 跳过</div>
+  </div>
+
+  <!-- 音量：默认收在右下角一枚按钮里，点开才展开（战斗中不常驻挡视野） -->
+  <div class="audio-dock">
+    <button id="audio-toggle" class="audio-toggle" type="button" aria-label="音量设置">♪</button>
+    <div class="audio-panel" data-page-node-id="XJ2Em1gcDY39YJOOaW7ggK">
+    <label data-page-node-id="ctxZrJKn3618DpbHBKAxB6">音<i id="vol-master-label" data-page-node-id="z11my6pZlLqBXi5bOpuCBn">70</i><input id="vol-master" type="range" min="0" max="100" value="70" data-page-node-id="tuCwnDrd07v2xdkgP0fbzU"></label>
+    <label data-page-node-id="QuX1St52vMiJ1kfIEK56DY">乐<i id="vol-music-label" data-page-node-id="uBa3n9V8Cf5mepV2BqD4X3">55</i><input id="vol-music" type="range" min="0" max="100" value="55" data-page-node-id="Kb9jKlYZYbdMS0Zn93pFFc"></label>
+      <label data-page-node-id="YHrmb7NZ2vU0HePzPtBHbi">效<i id="vol-sfx-label" data-page-node-id="K2yHlEpnFAjZmZYtu0cXLA">85</i><input id="vol-sfx" type="range" min="0" max="100" value="85" data-page-node-id="Vi0WTRMjnEU63S5AOQPcuD"></label>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ 标题界面 ============================ -->
+<div id="title" class="screen" data-page-node-id="xCZAKX9egvbKCXKHGNdMoS">
+  <div class="title-bg-grid" data-page-node-id="SwWn3DrE3B89L7deMUIQ3W"></div>
+  <div class="title-inner" data-page-node-id="WQc5oUYynU5fUYE3dX6nTn">
+    <div class="title-kicker" data-page-node-id="ElhQ8H06KgRhOC6lBXVKde">呪術廻戦 · 新宿決戦</div>
+    <h1 class="title-main" data-page-node-id="hetQqTZslCB7wxFTByqAV0">
+      <span class="t-jp" data-page-node-id="Q4rwfqBgZCK7mEUDSZ14hA">新宿決戰</span>
+      <span class="t-en" data-page-node-id="DFJAWrf4U23FakxwyQ90PS">SHINJUKU SHOWDOWN</span>
+    </h1>
+    <div class="title-vs" data-page-node-id="BLEHCzziAnjmOxWSpcFCKm">
+      <span class="vs-left" data-page-node-id="7x6OaFpD1Mz4kzR8ybEH45">五条 悟</span>
+      <span class="vs-mark" data-page-node-id="K228fVxFlZqVHLvBnEHBT2">VS</span>
+      <span class="vs-right" data-page-node-id="7rMmx3Cw5WFwOrvWmfVlGO">宿 儺</span>
+    </div>
+
+    <div class="title-actions" data-page-node-id="b9lNoRtYPZuvtal6LTdl3K">
+      <button id="btn-start" class="btn primary" data-page-node-id="xsq7TlQhmPF3HtcrS2abXg">开 战<span class="btn-sub" data-page-node-id="HlPLpsfOoP22EuEEqB8sGl">含开场播片 · 虚式「茈」200%</span></button>
+      <button id="btn-skip-cine" class="btn" data-page-node-id="GqLN0TDbGiOsZdQajMHwBN">直接进入战斗<span class="btn-sub" data-page-node-id="mrbNABFOrUYTKIKhXcCvBd">跳过播片</span></button>
+    </div>
+
+    <div class="controls-grid" data-page-node-id="ehxn8hrupIW71JSIZxKzDL">
+      <div class="cg-col" data-page-node-id="XWOPx5caUbmvgHZ3qcrHw3">
+        <h4 data-page-node-id="Jt2ynISd7cJb658bAvaCmr">移动</h4>
+        <p data-page-node-id="oA0QBCAxWPQtIICkGFGYLP"><b data-page-node-id="ZGDD9gr9R9dP3EIZTVwrbJ">W A S D</b> 移动（相对镜头）</p>
+        <p data-page-node-id="OrsQbWicpDltuVnvr0Fe1G"><b data-page-node-id="qnzVJkHzHf87WqilzG4OKT">Shift</b> 冲刺</p>
+        <p data-page-node-id="colDJLRlpM1C57swk6xqO4"><b data-page-node-id="eVAbUFkFhXsIXx9mv22ej7">空格</b> 无下限 / 闪避</p>
+      </div>
+      <div class="cg-col" data-page-node-id="sGcCT8d6oX0r05loDmCtrc">
+        <h4 data-page-node-id="OlokAczQh5xzhXkSz7XIUb">体术</h4>
+        <p data-page-node-id="JRIYK8GJKttqEE7rHp0PDM"><b data-page-node-id="MvTKzPcRhiaeGhGvpkBUy7">J</b> 轻击（可三连段）</p>
+        <p data-page-node-id="UKFWdpt7FgvLIDdIH9Et2B"><b data-page-node-id="w9hDLbSHxvJvOWLlyJdZNH">K</b> 重击 / 踢击</p>
+        <p data-page-node-id="TNZpZw4UFy7x3DKmmpaU7E"><b data-page-node-id="XDLWNfaD5Q8UgKcsfymbF8">J</b> 命中后 0.28s 内再命中 → <em data-page-node-id="dZImPs8Fi9zssxFiJGfmDK">黑闪</em></p>
+      </div>
+      <div class="cg-col" data-page-node-id="HbkGxbm5IaPPtZmEz3uVuL">
+        <h4 data-page-node-id="rerBF32KgXY3Y2cdiX5Gff">术式</h4>
+        <p data-page-node-id="lFzglrdcg1AwEfoKhaH8TG"><b data-page-node-id="Jt2uHgMVkEpYGXTbxKFrvH">U</b> 术式顺转「苍」</p>
+        <p data-page-node-id="nsdueNirazyUEyz1Oa4pUr"><b data-page-node-id="u7pBbQYxmG0a4YBS9ZIwhA">I</b> 术式反转「赫」</p>
+        <p data-page-node-id="P1548JFbw2xx3DYbhM0YSp"><b data-page-node-id="EyTbFUKyveZqbGIrUC5Kmj">O</b> 虚式「茈」（按住蓄力）</p>
+      </div>
+      <div class="cg-col" data-page-node-id="vwYUaAthUrDoAm4LbdufeH">
+        <h4 data-page-node-id="nPNUWT465Ir3xdF1MFicuz">其它</h4>
+        <p data-page-node-id="uLq9gDMOdols1moImQWqgO"><b data-page-node-id="a24NZfaGdqtMELToYXXY82">H</b> 反转术式（自愈）</p>
+        <p data-page-node-id="7ZkUUSNFE3kBwO7LvHMst5"><b data-page-node-id="4A2KoaVDAehPsRb6f1N651">G</b> 领域展开「无量空处」</p>
+        <p data-page-node-id="bTsMCAuEvjK7T1XzyeDilk"><b data-page-node-id="UP2R3JbaIry4p1oicOqHGv">L</b> 起手式（蓄力 200% 茈）</p>
+      </div>
+      <div class="cg-col" data-page-node-id="C53G1Whm0N1rZu31at3VRM">
+        <h4 data-page-node-id="A4HwjDNOmQwT24oqoXRUK6">镜头</h4>
+        <p data-page-node-id="l7H80SpP6FlTO5AXPT9VCv"><b data-page-node-id="E8Hj65hXQ3WIeGmVtrajRd">鼠标左键拖拽</b> 旋转</p>
+        <p data-page-node-id="iNYE36PrSEsi2PORQM5jpU"><b data-page-node-id="abA8QCfZ7u8UD6GAXCBkuj">滚轮</b> 拉近 / 拉远</p>
+        <p data-page-node-id="AnQtB97UeY9hbx0EcISzQ5"><b data-page-node-id="rGthLCqy55tYHLeojOVf6R">右键拖拽</b> 平移视角</p>
+      </div>
+      <div class="cg-col" data-page-node-id="ssB03X4EIqVm09R1j4qrO8">
+        <h4 data-page-node-id="IAR1JNUOEswxKmhiSLlSqm">系统</h4>
+        <p data-page-node-id="JYGPsBukb7yRuTdX7XT9XQ"><b data-page-node-id="sxznjtAUapKkEhSvfFDTLh">P / Esc</b> 暂停</p>
+        <p data-page-node-id="Eh1OzFCDQP7Em5DaXjiubT"><b data-page-node-id="AeD5kLhRmz8Pa4ON9lkoWZ">R</b> 重新开始</p>
+        <p data-page-node-id="7iu1CCg5bPt1IGN0i1oG7L"><b data-page-node-id="SC6Xfh1bb3If4HLpqv6krn">F</b> 全屏</p>
+      </div>
+    </div>
+
+    <div class="title-foot" data-page-node-id="0tYDtcBWSSYMZSClfeF81o">
+      <span data-page-node-id="1cyWECHPpsNw8p0jSJluNT">非商业同人作品 · 招式与人设参考《咒术回战》</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ 暂停 ============================ -->
+<div id="pause" class="screen compact hidden" data-page-node-id="sHlIFmSnFhHvqSBV0Bcgic">
+  <div class="pause-inner" data-page-node-id="bbh7GKf3tjqKH0OAsljuEm">
+    <h2 data-page-node-id="nhQu0mlbYqEyrmlFABabNK">暫 停</h2>
+    <button id="btn-resume" class="btn primary" data-page-node-id="ATAka7fXwusqTOoHADyzAe">继续</button>
+    <button id="btn-restart" class="btn" data-page-node-id="KHLbGj1RDdnfLXLILaFkLo">重新开始</button>
+    <button id="btn-totitle" class="btn" data-page-node-id="CElsZgN6QiwcsDRGiBkEcY">返回标题</button>
+    <div class="pause-note" data-page-node-id="7YpEsa1DiBHSkLcSwtiGU0">按 <b data-page-node-id="5zkiwFHL53pl2mwxBN0b7b">P</b> 或 <b data-page-node-id="mXmyDGFs2zYH5AIvj9dgax">Esc</b> 继续</div>
+  </div>
+</div>
+
+<!-- ============================ 结算 ============================ -->
+<div id="result" class="screen compact hidden" data-page-node-id="IHDq1E7vhVup8arFbowqv5">
+  <div class="result-inner" data-page-node-id="kgpN0BAhpleytJ6sZ5aAt1">
+    <div id="result-mark" class="result-mark" data-page-node-id="xMuMALT7hec5RyZVqjegdh">勝</div>
+    <h2 id="result-title" data-page-node-id="00z7ID7eNKajb4bdV2UWhA">五条悟 · 胜</h2>
+    <p id="result-sub" data-page-node-id="FzlYVixDGCaZgzdNyHOXK2">宿傩的咒力残秽正在消散</p>
+    <div id="result-stats" class="result-stats" data-page-node-id="KsXFXsHzCZV9HEI8TQpY19"></div>
+    <div class="result-actions" data-page-node-id="dbWrTWQ04zEwYVBKJC3w0d">
+      <button id="btn-again" class="btn primary" data-page-node-id="DFGcm04ZmWuTRXORTe4fHG">再战</button>
+      <button id="btn-back" class="btn" data-page-node-id="axHsXXm3lZBgt7nOk9XQYB">返回标题</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ 载入 / 错误 ============================ -->
+<div id="loading" class="screen compact" data-page-node-id="zj5Xx1CjUzYZztR2hdKRtE">
+  <div class="loading-inner" data-page-node-id="tGRIzHzjVL4mypHHi1GoCb">
+    <div class="spin" data-page-node-id="cReV15MN3fdgv6EgC6NXTQ"></div>
+    <div class="loading-text" data-page-node-id="0lIfxQDU6UTTGmQpt7iVMO">正在展开领域…</div>
+    <div id="loading-step" class="loading-step" data-page-node-id="cPg5evfKEazGKtNPu2w0RO">初始化</div>
+    <div id="boot-diag" class="boot-diag hidden" data-page-node-id="ibwJgaineBkr4MWkylwoN6"></div>
+  </div>
+</div>
+
+<div id="crash" class="screen compact hidden" data-page-node-id="FBYyU3ygIwjfACxiQlLcSY">
+  <div class="crash-inner" data-page-node-id="TVxrJ4OQJX66zPu6qkJ5AD">
+    <h2 data-page-node-id="FxdRaL0wLdMzfA8SbJ5Rfw">运行出错</h2>
+    <pre id="crash-msg" data-page-node-id="KmxAgABW3q5j3vDGJ0JWmC"></pre>
+    <button id="btn-crash-reload" class="btn primary" data-page-node-id="hLLyEuLDXx6zmFYLcCjltr">重新载入</button>
+  </div>
+</div>
+
+<!-- ==========================================================================
+     引导看门狗（普通脚本，不是 module）
+     目的：把「永远转圈」变成能自己说清原因的提示。
+     这段刻意用最保守的 ES5 写法，保证在任何浏览器里都能先跑起来 ——
+     如果主模块因为任何原因没被加载/没执行，它会是唯一能告诉你原因的东西。
+     ========================================================================== -->
+<script>
+(function () {
+  var BOOT = { ok: false, step: '初始化', err: null, started: Date.now() };
+
+  // 暴露给 main.js 更新进度
+  window.__BOOT = BOOT;
+  window.__BOOT_FAIL = function (title, detail) {
+    BOOT.err = title;
+    try { render(title, detail); } catch (e) { /* 忽略 */ }
+  };
+
+  function el(id) { return document.getElementById(id); }
+
+  function render(title, detail) {
+    var d = el('boot-diag');
+    if (!d) return;
+    d.className = 'boot-diag';
+    d.innerHTML =
+      '<div class="bd-title">' + title + '</div>' +
+      '<div class="bd-body">' + detail + '</div>';
+    var sp = document.querySelector('#loading .spin');
+    if (sp) sp.style.animation = 'none';
+    var lt = document.querySelector('#loading .loading-text');
+    if (lt) lt.textContent = '无法启动';
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>]/g, function (c) {
+      return c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;';
+    });
+  }
+
+  /* ---- 1. 最常见的坑：用 file:// 直接打开多文件版 ----
+   * 注意：单文件构建（新宿决战.html）会把全部 JS 内联进来，
+   * 那种情况下 file:// 是完全合法的，由 window.__SS_SINGLE_FILE 标记出来。 */
+  if (location.protocol === 'file:' && !window.__SS_SINGLE_FILE) {
+    render('必须通过本地服务器打开',
+      '你现在是直接双击打开 <code>index.html</code>（<code>file://</code>）。<br><br>' +
+      '浏览器出于安全限制，<b>不允许 file:// 页面加载 ES Module</b>，' +
+      '所以游戏的主程序根本没有被执行 —— 这就是一直转圈的原因。<br><br>' +
+      '<b>正确做法（任选其一）：</b><br>' +
+      '① 回到项目文件夹，<b>双击 <code>启动游戏.bat</code></b>（推荐）<br>' +
+      '② 命令行执行 <code>npm start</code>，然后打开 ' +
+      '<a href="http://127.0.0.1:8173/" target="_blank">http://127.0.0.1:8173/</a><br>' +
+      '③ 命令行执行 <code>npx serve .</code> 或 <code>python -m http.server 8173</code><br><br>' +
+      '启动后请用 <b>http://127.0.0.1:8173/</b> 访问，不要再双击 html 文件。');
+    return;
+  }
+
+  /* ---- 2. 早起捕获错误（早于 main.js 加载）---- */
+  window.addEventListener('error', function (e) {
+    if (BOOT.ok) return;
+    var t = e && e.target;
+    if (t && (t.tagName === 'SCRIPT' || t.tagName === 'LINK')) {
+      BOOT.err = '资源加载失败: ' + (t.src || t.href);
+    } else if (e && e.message) {
+      BOOT.err = e.message;
+    }
+  }, true);
+
+  window.addEventListener('unhandledrejection', function (e) {
+    if (BOOT.ok) return;
+    BOOT.err = '未处理的 Promise 异常: ' + ((e.reason && e.reason.message) || e.reason);
+  });
+
+  /* ---- 3. 定时体检 ---- */
+  var CHECKS = [
+    { at: 4000, what: '主程序未能启动' },
+    { at: 25000, what: '初始化超时' },
+  ];
+  var idx = 0;
+
+  setInterval(function () {
+    if (BOOT.ok) return;
+    var elapsed = Date.now() - BOOT.started;
+    while (idx < CHECKS.length && elapsed >= CHECKS[idx].at) {
+      var c = CHECKS[idx++];
+      var detail;
+      if (c.what === '主程序未能启动') {
+        detail =
+          '浏览器已加载页面，但 <code>src/main.js</code> 没有执行。常见原因：<br>' +
+          '· <b>用 file:// 直接打开了 html</b>（请改用 <code>启动游戏.bat</code>）<br>' +
+          '· 服务器没有真正在跑（确认命令行里出现了 <code>新宿决战 → http://127.0.0.1:8173/</code>）<br>' +
+          '· 浏览器插件 / 隐私模式拦截了模块脚本，可换一个浏览器或用无痕窗口试<br>' +
+          '· 端口 8173 被别的程序占用，换端口：<code>node serve.mjs 9000</code><br><br>' +
+          '当前地址：<code>' + esc(location.href) + '</code>' +
+          (BOOT.err ? '<br>捕获到的错误：<code>' + esc(BOOT.err) + '</code>' : '');
+      } else {
+        detail =
+          '初始化卡在「<b>' + esc(BOOT.step) + '</b>」这一步超过 ' +
+          Math.round(elapsed / 1000) + ' 秒。<br><br>' +
+          '可以尝试：<br>' +
+          '· 用 <code>?q=low</code> 强制最低画质：<a href="?q=low">点这里</a><br>' +
+          '· 如果显卡驱动较旧，再叠加 <code>&amp;post=0</code>：<a href="?q=low&post=0">点这里</a><br>' +
+          '· 刷新页面重试（首次生成城市较慢，但不应超过 30 秒）' +
+          (BOOT.err ? '<br>捕获到的错误：<code>' + esc(BOOT.err) + '</code>' : '');
+      }
+      render(c.what, detail);
+    }
+  }, 800);
+})();
+</script>
+
+<script>
+/* --- BGM 懒加载（站点版专用）：首屏绝不拉 2.7MB 音频，首次真实交互才请求 ---- */
+(function () {
+  var el = document.getElementById('bgm');
+  if (!el || !el.dataset || !el.dataset.src) return;
+  var done = false;
+  /*
+     职责收敛：这里只负责「尽早把 src 挂上，让 2.76MB 音频开始下载」，**不负责播放**。
+     播放统一交给 main.js 的 startBGM（它在冒泡阶段跑，并且带失败重试）。
+     之前这里也调 play()，两处逻辑重复且失败处理不一致，真出问题时分不清是谁没出声。
+  */
+  function go() {
+    if (done) return; done = true;
+    window.removeEventListener('pointerdown', go, true);
+    window.removeEventListener('keydown', go, true);
+    window.removeEventListener('touchstart', go, true);
+    window.removeEventListener('click', go, true);
+    el.src = el.dataset.src;
+  }
+  /* 捕获阶段 → 一定早于 main.js 的 startBGM（冒泡阶段），先一步开始下载 */
+  window.addEventListener('pointerdown', go, true);
+  window.addEventListener('touchstart', go, true);
+  window.addEventListener('keydown', go, true);
+  window.addEventListener('click', go, true);
+  window.__BGM_LAZY = { get loaded() { return !!el.getAttribute('src'); }, get playing() { return !el.paused; } };
+})();
+</script>
+<script>
+/* --- Service Worker 注册（站点版专用）-------------------------------------
+   目的：静态资源不重复下载 + 断网后仍能进入游戏。
+   为什么单独一个片段而不是塞进 lazy-audio.html：
+     两者职责不同 —— 一个是音频懒加载，一个是缓存策略，混在一起以后不好改。
+   为什么整体 try/catch 且只在 http(s) 下注册：
+     file:// 打开时浏览器会直接拒绝注册 SW；SW 只是增强项，
+     注册失败绝不允许影响游戏本身，更不能污染控制台报错。
+   ------------------------------------------------------------------------- */
+(function () {
+  if (!('serviceWorker' in navigator)) return;
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js', { scope: './' }).catch(function (e) {
+      if (window.console && console.info) {
+        console.info('[新宿决战] Service Worker 未注册（不影响游戏）:', e && e.message);
+      }
+    });
+  });
+})();
+</script>
+
+<script src="assets/game.js"></script>
+</body>
+</html>
