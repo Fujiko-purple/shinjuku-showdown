@@ -3451,6 +3451,15 @@
         const spNow = Math.hypot(vX, vZ);
         if (spNow < 0.45) { vX = 0; vZ = 0; }
         else { root.position.x += vX * d; root.position.z += vZ * d; }
+        /**
+         * 松手必须把步态动画收掉。
+         * 缺了这一步的后果：玩家一松开方向键，move() 就不再被调用，
+         * curName 永远停在 walk/run，角色**站着不动、双腿却定格在迈步的中间帧**，
+         * 看起来像个人偶。同理，一次性动作播完了也没人接管时一并回收。
+         */
+        if (spNow < 0.9 && (curName === "walk" || curName === "run" || (!curLoop && ended && !HOLD_AFTER_END[curName]))) {
+          play2("idle", { loop: true });
+        }
       }
       cmdMove = false;
       // ---- 转身：角速度做限幅 + 平滑（有加速减速），不再是"瞬间对齐" ----
