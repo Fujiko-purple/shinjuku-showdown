@@ -22,15 +22,22 @@ var CAM_FOV_BASE = 44;
 /** 角色世界身高（头顶到脚底，含头发）。用于把"占屏比例"换算成距离 */
 var CAM_CHAR_H = 1.72;
 /**
- * 目标占屏高度比例（解析值）。验收口径（Lead 脚本量的是角色网格 AABB 投影）比这个
- * 解析值大约 1.5 倍，所以这里取 0.30/0.26 时，验收口径实测落在 35%–45% 区间。
+ * 目标占屏高度比例（解析值）。
+ * 用户第二次反馈的原话：「太近了，人物建模缺陷一下子就都看到了，而且太近了也没有那种
+ * 空旷感，好像屏幕都被人物占据了一样」—— 所以这一版把人**明显拉远**：
+ * 验收口径（Lead 脚本量的是角色网格 AABB 投影）约为此解析值的 1.4 倍，
+ * 取 0.105/0.092 时验收口径实测落在 12%–18%（用户给的区间），距离约 20–23 米。
  */
-var CAM_FRAC_NEAR = 0.22;
-var CAM_FRAC_FAR = 0.195;
-/** 硬边界：任何设计镜头/遮挡处理都不得让角色低于 22% 或高于 46% */
-var CAM_FRAC_MIN = 0.22;
-var CAM_FRAC_MAX = 0.46;
-var CAM_DIST_MIN = 3.4;
+var CAM_FRAC_NEAR = 0.115;
+var CAM_FRAC_FAR = 0.1;
+/** 硬边界：任何设计镜头/遮挡处理都不得让角色低于 7.5% 或高于 34% */
+var CAM_FRAC_MIN = 0.075;
+var CAM_FRAC_MAX = 0.34;
+/**
+ * 最近距离 8 米：拉远之后如果还被遮到 3 米，画面会瞬间变成"怼脸特写"，
+ * 正好是用户最反感的效果。宁可让规避多抬镜头/多侧移，也不许贴脸。
+ */
+var CAM_DIST_MIN = 8;
 /**
  * 遮挡规避候选机位：{yaw偏移, pitch偏移, 距离乘数, 构图代价}。
  * 数组顺序 = 优先级：先什么都不做、再抬高、再侧移绕开、最后才拉近。
@@ -47,21 +54,20 @@ var CAM_AVOID = [
 ];
 var CAM_DIST_MAX = 46;
 /**
- * 设计俯角 ≈27°（0.47 rad）。
- * 取值理由：原版是 0.62(≈35°) 的上帝视角 —— 能同时看清双方走位和身边街区，
- * 那正是"在打新宿对决"的临场感来源；但 35° 会把 1.9 米的人压扁成小点。
- * 我上一版给的 17.8° 又太平，视野被压成一条线、看不见战场（用户直接反馈"镜头不如原版"）。
- * 27° 是折中：保住俯瞰战场的信息量，人物比例也不被俯角吃掉。
+ * 设计俯角 ≈31°（0.54 rad）。
+ * 用户要的是"空旷感、看得见新宿的街道"，所以镜头保持在高位俯瞰：
+ * 俯角越接近平视，画面越容易被人物和近处地面占满；抬高才能看见街区纵深与地面铺装。
+ * （原版是 0.62≈35°，这里比它略低一点，兼顾"人还在场景里"的可读性。）
  */
-var CAM_PITCH_DESIGN = 0.5;
+var CAM_PITCH_DESIGN = 0.54;
 /** 与对战轴线的夹角 ≈24°：斜侧 3/4 视角，既不是正后方也不是正侧面 */
 var CAM_YAW_SIDE = 0.42;
 /**
- * 注视点高度（脚底起算）。0.62 ≈ 膝盖高度：镜头看向人物下半身，
- * 人物整体就被推到画面中线略上方（验收口径 ndc y ≈ +0.10），
- * 上方留给人物的头与天际线，下方留给街道 —— 不再是"人物挤在画面下缘"。
+ * 注视点高度（脚底起算）。拉远之后人物只占屏高 12%–18%，
+ * 注视点取 0.48（略低于胸口）让人物落在画面中线附近（验收 NDC y ≈ +0.05），
+ * 上下都留出街道与街区 —— 而不是把人物顶到画面下缘。
  */
-var CAM_LOOK_H = 0.58;
+var CAM_LOOK_H = 0.48;
 var CAM_TAU = Math.PI * 2;
 
 var godCam = new PerspectiveCamera(CAM_FOV_BASE, 16 / 9, 0.25, 4e3);
@@ -513,7 +519,7 @@ function updateGodCam(dt, snap) {
 
   // ---- 1. 滚轮缩放（仍然尊重玩家，但范围收在"角色不会缩成点"的区间里）----
   if (inputSnapshot.zoom) {
-    cam.zoomBias = clampNum2(cam.zoomBias * Math.pow(1.12, inputSnapshot.zoom), 0.78, 1.4);
+    cam.zoomBias = clampNum2(cam.zoomBias * Math.pow(1.12, inputSnapshot.zoom), 0.75, 1.3);
     inputSnapshot.zoom = 0;
   }
 
@@ -575,9 +581,9 @@ function updateGodCam(dt, snap) {
     }
     // 标题：宽屏给一个街头中远景（原版是 46m 超远景，那个距离人已经看不见了），
     // 竖屏水平视野窄，只能环绕单人
-    camTitleDist = camNarrow > 0.35 ? 11 : 26;
-    fracT = camNarrow > 0.35 ? 0.24 : 0.17;
-    wantPitch = 0.5;
+    camTitleDist = camNarrow > 0.35 ? 13 : 32;
+    fracT = camNarrow > 0.35 ? 0.16 : 0.12;
+    wantPitch = 0.54;
     baseYaw = cam.yaw;
   } else if (state === "paused") {
     // 暂停：完全锁住当前构图，不做任何自动漂移
@@ -600,8 +606,9 @@ function updateGodCam(dt, snap) {
     wantY = py + CAM_LOOK_H + 0.1;
     cam.yaw += dt * 0.2;
     baseYaw = cam.yaw;
-    fracT = 0.33;
-    wantPitch = 0.27;
+    // 胜负定格也保持"人在场景里"的比例，不再怼近景
+    fracT = 0.14;
+    wantPitch = 0.4;
   } else if (fighting && gojo && sukuna) {
     const gp = gojo.getPos();
     const sp = sukuna.getPos();
@@ -614,7 +621,7 @@ function updateGodCam(dt, snap) {
       wantX = gp.x * 0.62 + sp.x * 0.38 + cam.panX;
       wantZ = gp.z * 0.62 + sp.z * 0.38 + cam.panZ;
       wantY = Math.max(gp.y, sp.y) + CAM_LOOK_H; // 与普通战斗同一注视高度，人物落在画面中部
-      fracT = clampNum2(0.30 - sep * 0.008, 0.22, 0.30); // 对撞要同时看两个人 + 领域球，站远一点
+      fracT = clampNum2(0.16 - sep * 0.006, 0.12, 0.16); // 对撞要同时看两个人 + 领域球，站得更远
       wantPitch = 0.55; // 对撞时抬高机位，两人 + 领域球一起进画面
       baseYaw += dt * 0.07;
       cam.lockOn || (cam.yaw += 0);

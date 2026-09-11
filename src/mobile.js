@@ -477,6 +477,32 @@ var MOBILE = (function () {
   /* ==========================================================================
      六、工具键 / 提示 / 旋转提示 / 标题页图例
      ========================================================================== */
+  /**
+   * 全屏 + 锁定横屏。
+   * 三个坑都在这里处理：
+   *  1. 必须**等全屏真正生效**再锁横屏 —— 非全屏状态下 lock() 必被拒。
+   *     原来固定等 700ms 是赌运气，全屏动画稍慢就失败；改成轮询 fullscreenElement。
+   *  2. lock() 返回 Promise，被拒时原来静默吞掉，用户只觉得"点了没反应" → 现在明确提示。
+   *  3. iOS Safari 根本没有 orientation.lock → 同样给提示，而不是假装成功。
+   */
+  function goFullscreenLandscape() {
+    tapKey("KeyF");   // 游戏自己的键位：F = 全屏
+    var tries = 0;
+    function tryLock() {
+      tries++;
+      var fs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      if (!fs && tries < 14) { setTimeout(tryLock, 150); return; }
+      var so = screen.orientation;
+      if (!so || !so.lock) { toast("本机不支持自动横屏，请手动把手机横过来", 2800); return; }
+      try {
+        var r = so.lock("landscape");
+        if (r && r.catch) r.catch(function () { toast("自动横屏被系统拒绝，请手动把手机横过来", 2800); });
+      } catch (e) {
+        toast("本机不支持自动横屏，请手动把手机横过来", 2800);
+      }
+    }
+    setTimeout(tryLock, 200);
+  }
   function utilAction(act, el) {
     switch (act) {
       case "cam": {
@@ -488,18 +514,7 @@ var MOBILE = (function () {
         break;
       }
       case "quality": cycleQuality(); break;
-      case "full": {
-        tapKey("KeyF");   // 游戏自己的键位：F = 全屏
-        setTimeout(function () {
-          try {
-            if (screen.orientation && screen.orientation.lock) {
-              var r = screen.orientation.lock("landscape");
-              if (r && r.catch) r.catch(function () { /* 桌面/未授权忽略 */ });
-            }
-          } catch (e) { /* 忽略 */ }
-        }, 700);
-        break;
-      }
+      case "full": goFullscreenLandscape(); break;
       case "sound": toggleSheet(); break;
       case "pause": tapKey("Escape"); break;
     }
@@ -560,7 +575,9 @@ var MOBILE = (function () {
       e.preventDefault();
       b.classList.add("t-down");
       setTimeout(function () { b.classList.remove("t-down"); }, 140);
-      if (b.dataset.act === "rotate-go") { tapKey("KeyF"); hideRotateHint(true); }
+      // ⚠ 原来这里只调了 tapKey("KeyF")（全屏），**漏掉横屏锁定** ——
+      // 这正是"点全屏并横屏却不自动横屏"的 bug。现在统一走 goFullscreenLandscape()。
+      if (b.dataset.act === "rotate-go") { goFullscreenLandscape(); hideRotateHint(true); }
       else hideRotateHint(true);
     }));
     return rotateEl;

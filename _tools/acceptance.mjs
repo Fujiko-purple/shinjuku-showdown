@@ -237,8 +237,18 @@ if (report.errors?.length) fails.push(`运行期异常 ${report.errors.length} �
 if (report.hud?.flashCoversHud) fails.push('#flash 的 z-index 高于 #hud（会盖住 HUD）');
 if (report.hud?.outOfView?.length) fails.push(`HUD 元素溢出视口 ${report.hud.outOfView.length} 个`);
 if (report.hud?.tiny?.length) fails.push(`HUD 文字过小 ${report.hud.tiny.length} 个`);
+/**
+ * 角色屏幕占比。
+ *
+ * ⚠ 这条阈值我一开始写成「≥20%，理想 30-45%」，依据是"格斗游戏要看清楚角色"——
+ *   **结果是错的，而且代价很大**：团队照这个指标把镜头一路推近到 37%，
+ *   用户实测后反馈"太近了，人物建模缺陷一下子就都看到了，没有空旷感，屏幕都被人物占据"。
+ *   这个项目要的是**看得见新宿街道的空间感**，不是怼脸看模型。
+ *   所以放宽到 ≥10%，只守住"角色没跑出画面 / 没小到看不见"这条底线，
+ *   具体远近交给用户的主观判断（他们随时可以让相机负责人步进调）。
+ */
 const gr = report.charRatio?.gojo;
-if (gr && gr.onScreen && gr.heightPct < 20) fails.push(`角色屏幕占比仅 ${gr.heightPct}%（格斗游戏要求 ≥20%，理想 30-45%）`);
+if (gr && gr.onScreen && gr.heightPct < 10) fails.push(`角色屏幕占比仅 ${gr.heightPct}%（底线 10%，用于防"小到看不见"）`);
 if (gr && gr.onScreen === false) fails.push('战斗中角色跑出视野');
 if (report.perf?.avgFps && report.perf.avgFps < 55) fails.push(`平均帧率 ${report.perf.avgFps} < 55`);
 const blownStates = Object.entries(report.states || {}).filter(([, v]) => v && v.blownPct > 25).map(([k, v]) => `${k}=${v.blownPct}%`);

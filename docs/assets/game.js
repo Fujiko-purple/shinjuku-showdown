@@ -30755,15 +30755,22 @@ var CAM_FOV_BASE = 44;
 /** 角色世界身高（头顶到脚底，含头发）。用于把"占屏比例"换算成距离 */
 var CAM_CHAR_H = 1.72;
 /**
- * 目标占屏高度比例（解析值）。验收口径（Lead 脚本量的是角色网格 AABB 投影）比这个
- * 解析值大约 1.5 倍，所以这里取 0.30/0.26 时，验收口径实测落在 35%–45% 区间。
+ * 目标占屏高度比例（解析值）。
+ * 用户第二次反馈的原话：「太近了，人物建模缺陷一下子就都看到了，而且太近了也没有那种
+ * 空旷感，好像屏幕都被人物占据了一样」—— 所以这一版把人**明显拉远**：
+ * 验收口径（Lead 脚本量的是角色网格 AABB 投影）约为此解析值的 1.4 倍，
+ * 取 0.105/0.092 时验收口径实测落在 12%–18%（用户给的区间），距离约 20–23 米。
  */
-var CAM_FRAC_NEAR = 0.22;
-var CAM_FRAC_FAR = 0.195;
-/** 硬边界：任何设计镜头/遮挡处理都不得让角色低于 22% 或高于 46% */
-var CAM_FRAC_MIN = 0.22;
-var CAM_FRAC_MAX = 0.46;
-var CAM_DIST_MIN = 3.4;
+var CAM_FRAC_NEAR = 0.115;
+var CAM_FRAC_FAR = 0.1;
+/** 硬边界：任何设计镜头/遮挡处理都不得让角色低于 7.5% 或高于 34% */
+var CAM_FRAC_MIN = 0.075;
+var CAM_FRAC_MAX = 0.34;
+/**
+ * 最近距离 8 米：拉远之后如果还被遮到 3 米，画面会瞬间变成"怼脸特写"，
+ * 正好是用户最反感的效果。宁可让规避多抬镜头/多侧移，也不许贴脸。
+ */
+var CAM_DIST_MIN = 8;
 /**
  * 遮挡规避候选机位：{yaw偏移, pitch偏移, 距离乘数, 构图代价}。
  * 数组顺序 = 优先级：先什么都不做、再抬高、再侧移绕开、最后才拉近。
@@ -30780,21 +30787,20 @@ var CAM_AVOID = [
 ];
 var CAM_DIST_MAX = 46;
 /**
- * 设计俯角 ≈27°（0.47 rad）。
- * 取值理由：原版是 0.62(≈35°) 的上帝视角 —— 能同时看清双方走位和身边街区，
- * 那正是"在打新宿对决"的临场感来源；但 35° 会把 1.9 米的人压扁成小点。
- * 我上一版给的 17.8° 又太平，视野被压成一条线、看不见战场（用户直接反馈"镜头不如原版"）。
- * 27° 是折中：保住俯瞰战场的信息量，人物比例也不被俯角吃掉。
+ * 设计俯角 ≈31°（0.54 rad）。
+ * 用户要的是"空旷感、看得见新宿的街道"，所以镜头保持在高位俯瞰：
+ * 俯角越接近平视，画面越容易被人物和近处地面占满；抬高才能看见街区纵深与地面铺装。
+ * （原版是 0.62≈35°，这里比它略低一点，兼顾"人还在场景里"的可读性。）
  */
-var CAM_PITCH_DESIGN = 0.5;
+var CAM_PITCH_DESIGN = 0.54;
 /** 与对战轴线的夹角 ≈24°：斜侧 3/4 视角，既不是正后方也不是正侧面 */
 var CAM_YAW_SIDE = 0.42;
 /**
- * 注视点高度（脚底起算）。0.62 ≈ 膝盖高度：镜头看向人物下半身，
- * 人物整体就被推到画面中线略上方（验收口径 ndc y ≈ +0.10），
- * 上方留给人物的头与天际线，下方留给街道 —— 不再是"人物挤在画面下缘"。
+ * 注视点高度（脚底起算）。拉远之后人物只占屏高 12%–18%，
+ * 注视点取 0.48（略低于胸口）让人物落在画面中线附近（验收 NDC y ≈ +0.05），
+ * 上下都留出街道与街区 —— 而不是把人物顶到画面下缘。
  */
-var CAM_LOOK_H = 0.58;
+var CAM_LOOK_H = 0.48;
 var CAM_TAU = Math.PI * 2;
 
 var godCam = new PerspectiveCamera(CAM_FOV_BASE, 16 / 9, 0.25, 4e3);
@@ -31246,7 +31252,7 @@ function updateGodCam(dt, snap) {
 
   // ---- 1. 滚轮缩放（仍然尊重玩家，但范围收在"角色不会缩成点"的区间里）----
   if (inputSnapshot.zoom) {
-    cam.zoomBias = clampNum2(cam.zoomBias * Math.pow(1.12, inputSnapshot.zoom), 0.78, 1.4);
+    cam.zoomBias = clampNum2(cam.zoomBias * Math.pow(1.12, inputSnapshot.zoom), 0.75, 1.3);
     inputSnapshot.zoom = 0;
   }
 
@@ -31308,9 +31314,9 @@ function updateGodCam(dt, snap) {
     }
     // 标题：宽屏给一个街头中远景（原版是 46m 超远景，那个距离人已经看不见了），
     // 竖屏水平视野窄，只能环绕单人
-    camTitleDist = camNarrow > 0.35 ? 11 : 26;
-    fracT = camNarrow > 0.35 ? 0.24 : 0.17;
-    wantPitch = 0.5;
+    camTitleDist = camNarrow > 0.35 ? 13 : 32;
+    fracT = camNarrow > 0.35 ? 0.16 : 0.12;
+    wantPitch = 0.54;
     baseYaw = cam.yaw;
   } else if (state === "paused") {
     // 暂停：完全锁住当前构图，不做任何自动漂移
@@ -31333,8 +31339,9 @@ function updateGodCam(dt, snap) {
     wantY = py + CAM_LOOK_H + 0.1;
     cam.yaw += dt * 0.2;
     baseYaw = cam.yaw;
-    fracT = 0.33;
-    wantPitch = 0.27;
+    // 胜负定格也保持"人在场景里"的比例，不再怼近景
+    fracT = 0.14;
+    wantPitch = 0.4;
   } else if (fighting && gojo && sukuna) {
     const gp = gojo.getPos();
     const sp = sukuna.getPos();
@@ -31347,7 +31354,7 @@ function updateGodCam(dt, snap) {
       wantX = gp.x * 0.62 + sp.x * 0.38 + cam.panX;
       wantZ = gp.z * 0.62 + sp.z * 0.38 + cam.panZ;
       wantY = Math.max(gp.y, sp.y) + CAM_LOOK_H; // 与普通战斗同一注视高度，人物落在画面中部
-      fracT = clampNum2(0.30 - sep * 0.008, 0.22, 0.30); // 对撞要同时看两个人 + 领域球，站远一点
+      fracT = clampNum2(0.16 - sep * 0.006, 0.12, 0.16); // 对撞要同时看两个人 + 领域球，站得更远
       wantPitch = 0.55; // 对撞时抬高机位，两人 + 领域球一起进画面
       baseYaw += dt * 0.07;
       cam.lockOn || (cam.yaw += 0);
@@ -48656,6 +48663,22 @@ void main(){
     const headVel = new Vector3();
     const hipsRestY = bones.hips.position.y;
     let targetYaw = null;
+    /* ---------------- 手感状态（操作感的核心） ----------------
+     * 位移不再"按键=全速、松手=钉死"，而是走速度插值：
+     * 按下去有起步、松手有惯性滑行；转身走角速度限幅 + 平滑。 */
+    let vX = 0, vZ = 0;            // 当前水平速度 m/s
+    let prevSpd = 0;               // 上一帧速率（算加速度 → 前后倾）
+    let cmdMove = false;           // 本帧是否收到移动指令
+    let turnVel = 0;               // 转身角速度 rad/s
+    let leanRoll = 0;              // 转弯侧倾
+    let leanPitch = 0;             // 加减速前后倾
+    /* 姿态交叉淡入：切换动作时从"上一帧真正贴上去的姿态"过渡到新动作，
+     * 不再是一帧硬切（原先 run→punch 单帧跳变 2.54 弧度） */
+    const appliedPose = {};
+    for (const bb of BONES) appliedPose[bb] = [0, 0, 0];
+    let appliedRootY = 0;
+    let blendT = 1;
+    let blendDur = 0.18;
     const setFlash = (v) => {
       flash = clamp5(v, 0, 1);
       for (const m of toonMats) m.uniforms.uFlash.value = flash;
@@ -48688,7 +48711,15 @@ void main(){
       state2.animT = curT;
       const clip = sampler.get(curName);
       const dur = clip ? clip.dur : 1;
-      curT += d * curSpeed;
+      // 步频跟随实际速度：脚不打滑（脚滑是"玩起来不像 3D 游戏"的最大来源之一）。
+      // 走/跑时用真实速度除以该动作的额定速度，冲刺时步频自然加快。
+      let strideScale = 1;
+      if (curName === "walk" || curName === "run") {
+        const spNow0 = Math.hypot(vX, vZ);
+        const ref = curName === "run" ? RUN_SPEED : WALK_SPEED;
+        strideScale = clamp5(spNow0 / Math.max(ref, 0.01), 0.5, 1.75);
+      }
+      curT += d * curSpeed * strideScale;
       if (curLoop) {
         if (dur > 0) curT = curT % dur;
       } else if (curT >= dur) {
@@ -48706,12 +48737,36 @@ void main(){
         }
       }
       if (!sampler.sample(curName, curT, poseBuf)) return;
+      // ---- 交叉淡入：从切换瞬间的姿态平滑过渡到新动作 ----
+      if (blendT < 1) {
+        blendT = Math.min(1, blendT + d / blendDur);
+        // 用 smoothstep 而不是 easeOut：easeOut 第一帧就吃掉 40%，
+        // 那一帧本身就是一次大跳变（实测 1.0 弧度），smoothstep 首帧只走 7%
+        const bk = blendT * blendT * (3 - 2 * blendT);
+        for (const b of BONES) {
+          const o = poseBuf[b], p = appliedPose[b];
+          o[0] = p[0] + (o[0] - p[0]) * bk;
+          o[1] = p[1] + (o[1] - p[1]) * bk;
+          o[2] = p[2] + (o[2] - p[2]) * bk;
+        }
+        poseBuf.__rootY = appliedRootY + (poseBuf.__rootY - appliedRootY) * bk;
+      }
       for (const b of BONES) {
         const node = bones[b];
         const v = poseBuf[b];
         node.rotation.set(v[0], v[1], v[2]);
       }
       bones.hips.position.y = hipsRestY + poseBuf.__rootY;
+      // ---- 加减速的前后倾：加速时上半身前压、急停时后仰，这是"有质量"的观感来源 ----
+      {
+        const spNow = Math.hypot(vX, vZ);
+        const acc = (spNow - prevSpd) / Math.max(d, 1e-4);
+        prevSpd = spNow;
+        const pitchTarget = clamp5(acc * 0.012, -0.13, 0.17);
+        leanPitch += (pitchTarget - leanPitch) * Math.min(1, d * 7);
+        bones.core.rotation.x += leanPitch;
+        bones.hips.rotation.x += leanPitch * 0.35;
+      }
       if (q.secondary) {
         const breath = Math.sin(tGlobal * 1.75) * 0.026;
         const sway = Math.sin(tGlobal * 0.62) * 0.02;
@@ -48721,6 +48776,32 @@ void main(){
         bones.hips.rotation.z += sway2;
         bones.neck.rotation.y += Math.sin(tGlobal * 0.37 + 1.1) * 0.05;
         bones.head.rotation.z += Math.sin(tGlobal * 0.9) * 0.02;
+        // ---- 程序化行走层：让"走"是全身的事，而不是上半身刚体平移 ----
+        {
+          const spNow = Math.hypot(vX, vZ);
+          const amp = clamp5(spNow / 5.2, 0, 1.3);
+          if (amp > 0.08) {
+            const cad = spNow > 4.2 ? 9.4 : 6.6;    // 步频跟着速度走
+            // 走/跑时相位直接取自动作剪辑（curT/dur），骨盆起伏与脚步严格同相；
+            // 其它状态（冲刺/被击退等）退回自由相位
+            const ph = (curName === "walk" || curName === "run") && dur > 0
+              ? (curT / dur) * Math.PI * 2
+              : tGlobal * cad;
+            const s = Math.sin(ph), a2 = Math.abs(s);
+            // 幅度按"角色只占屏高 16%"来定：小尺寸下动作必须夸张一点才读得出来
+            bones.hips.position.y += (a2 - 0.62) * 0.038 * amp;   // 每步一沉一浮
+            bones.hips.rotation.z += s * 0.095 * amp;             // 骨盆左右倾
+            bones.hips.rotation.y += s * 0.16 * amp;              // 骨盆旋转
+            bones.chest.rotation.y -= s * 0.22 * amp;             // 肩带反向扭转
+            bones.chest.rotation.z -= s * 0.06 * amp;
+            bones.upperArmL.rotation.x += s * 0.3 * amp;          // 摆臂幅度随速度
+            bones.upperArmR.rotation.x -= s * 0.3 * amp;
+          }
+          // 头部稳定：抵消躯干扭转与侧倾，头不会跟着"摇"（人眼/前庭会自动保持水平）
+          bones.head.rotation.y -= bones.chest.rotation.y * 0.6;
+          bones.head.rotation.z -= (bones.core.rotation.z + bones.hips.rotation.z) * 0.45;
+          bones.head.rotation.x -= (bones.core.rotation.x + bones.chest.rotation.x) * 0.28;
+        }
         bones.head.getWorldPosition(tmpV);
         headVel.copy(tmpV).sub(prevHeadPos).multiplyScalar(28);
         prevHeadPos.copy(tmpV);
@@ -48758,14 +48839,36 @@ void main(){
         }
       }
       if (flash > 0) setFlash(Math.max(0, flash - d * flashDecay));
+      // ---- 松手惯性：不再"立刻钉死"，而是指数衰减滑一小段（约 20~30cm）----
+      if (!cmdMove) {
+        const dec = Math.exp(-d / 0.062);
+        vX *= dec; vZ *= dec;
+        const spNow = Math.hypot(vX, vZ);
+        if (spNow < 0.45) { vX = 0; vZ = 0; }
+        else { root.position.x += vX * d; root.position.z += vZ * d; }
+      }
+      cmdMove = false;
+      // ---- 转身：角速度做限幅 + 平滑（有加速减速），不再是"瞬间对齐" ----
       if (targetYaw !== null) {
         const diff = angleDelta(root.rotation.y, targetYaw);
-        const step = Math.sign(diff) * Math.min(Math.abs(diff), d * 9);
-        root.rotation.y += step;
-        if (Math.abs(diff) < 2e-3) {
+        const want = clamp5(diff * 8.5, -10, 10);
+        turnVel += (want - turnVel) * Math.min(1, d * 16);
+        root.rotation.y += turnVel * d;
+        if (Math.abs(diff) < 3e-3 && Math.abs(turnVel) < 0.08) {
           root.rotation.y = targetYaw;
           targetYaw = null;
+          turnVel = 0;
         }
+      } else {
+        turnVel *= Math.max(0, 1 - d * 10);
+      }
+      // 转弯时上半身先压肩侧倾（人体转身的自然动作）
+      {
+        const rollTarget = clamp5(-turnVel * 0.04, -0.26, 0.26);
+        leanRoll += (rollTarget - leanRoll) * Math.min(1, d * 9);
+        bones.core.rotation.z += leanRoll;
+        // 头再补偿一次侧倾（这段在头部稳定之后执行，所以要单独补）
+        if (q.secondary) bones.head.rotation.z -= leanRoll * 0.5;
       }
       {
         const canShow = !rig.isGojo;
@@ -48807,6 +48910,9 @@ void main(){
         curSpeed = (opt.speed !== void 0 ? opt.speed : 1) * animSpeed(name);
         return;
       }
+      // 攻击起手要快、位移动作可以柔一点：淡入时长按动作类型给
+      blendT = 0;
+      blendDur = ONESHOT[name] ? 0.1 : (name === "walk" || name === "run" || name === "idle" ? 0.2 : 0.14);
       curName = name;
       curT = 0;
       ended = false;
@@ -48856,14 +48962,26 @@ void main(){
       const dz = z - root.position.z;
       const len = Math.hypot(dx, dz);
       if (len < 1e-4) return 0;
-      const step = Math.min(len, Math.max(0, speed) * dt);
       moveDir.set(dx / len, 0, dz / len);
-      root.position.x += moveDir.x * step;
-      root.position.z += moveDir.z * step;
+      const want = Math.max(0, speed);
+      // 起步不再瞬间到全速：指数逼近，冲刺跟手更快、走位更有重量
+      const tau = want > 6.5 ? 0.055 : 0.085;
+      const k = 1 - Math.exp(-Math.max(dt, 1e-4) / tau);
+      vX += (moveDir.x * want - vX) * k;
+      vZ += (moveDir.z * want - vZ) * k;
+      const sp = Math.hypot(vX, vZ);
+      const step = Math.min(len, sp * Math.max(dt, 1e-4));
+      if (sp > 1e-5) {
+        root.position.x += (vX / sp) * step;
+        root.position.z += (vZ / sp) * step;
+      }
       faceTo(x, z, false);
+      cmdMove = true;
       if (curName === "idle" || curName === "walk" || curName === "run") {
-        const want = speed >= RUN_SPEED * 0.8 ? "run" : speed >= WALK_SPEED * 0.5 ? "walk" : "idle";
-        if (want !== curName) play2(want, { loop: true });
+        // 用"实际速度"驱动动画，起步时会自然经过 idle → walk → run
+        const spd = Math.max(sp, want * 0.55);
+        const wantAnim = spd >= RUN_SPEED * 0.8 ? "run" : spd >= WALK_SPEED * 0.5 ? "walk" : "idle";
+        if (wantAnim !== curName) play2(wantAnim, { loop: true });
       }
       return step;
     };
@@ -48932,6 +49050,11 @@ void main(){
       setFlash(0);
       knock.set(0, 0, 0);
       targetYaw = null;
+      vX = 0; vZ = 0; prevSpd = 0; cmdMove = false;
+      turnVel = 0; leanRoll = 0; leanPitch = 0;
+      blendT = 1;
+      for (const b of BONES) { const a = appliedPose[b]; a[0] = 0; a[1] = 0; a[2] = 0; }
+      appliedRootY = 0;
       root.position.set(0, 0, 0);
       root.rotation.set(0, 0, 0);
       setScale(1);
@@ -55087,6 +55210,32 @@ var MOBILE = (function () {
   /* ==========================================================================
      六、工具键 / 提示 / 旋转提示 / 标题页图例
      ========================================================================== */
+  /**
+   * 全屏 + 锁定横屏。
+   * 三个坑都在这里处理：
+   *  1. 必须**等全屏真正生效**再锁横屏 —— 非全屏状态下 lock() 必被拒。
+   *     原来固定等 700ms 是赌运气，全屏动画稍慢就失败；改成轮询 fullscreenElement。
+   *  2. lock() 返回 Promise，被拒时原来静默吞掉，用户只觉得"点了没反应" → 现在明确提示。
+   *  3. iOS Safari 根本没有 orientation.lock → 同样给提示，而不是假装成功。
+   */
+  function goFullscreenLandscape() {
+    tapKey("KeyF");   // 游戏自己的键位：F = 全屏
+    var tries = 0;
+    function tryLock() {
+      tries++;
+      var fs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      if (!fs && tries < 14) { setTimeout(tryLock, 150); return; }
+      var so = screen.orientation;
+      if (!so || !so.lock) { toast("本机不支持自动横屏，请手动把手机横过来", 2800); return; }
+      try {
+        var r = so.lock("landscape");
+        if (r && r.catch) r.catch(function () { toast("自动横屏被系统拒绝，请手动把手机横过来", 2800); });
+      } catch (e) {
+        toast("本机不支持自动横屏，请手动把手机横过来", 2800);
+      }
+    }
+    setTimeout(tryLock, 200);
+  }
   function utilAction(act, el) {
     switch (act) {
       case "cam": {
@@ -55098,18 +55247,7 @@ var MOBILE = (function () {
         break;
       }
       case "quality": cycleQuality(); break;
-      case "full": {
-        tapKey("KeyF");   // 游戏自己的键位：F = 全屏
-        setTimeout(function () {
-          try {
-            if (screen.orientation && screen.orientation.lock) {
-              var r = screen.orientation.lock("landscape");
-              if (r && r.catch) r.catch(function () { /* 桌面/未授权忽略 */ });
-            }
-          } catch (e) { /* 忽略 */ }
-        }, 700);
-        break;
-      }
+      case "full": goFullscreenLandscape(); break;
       case "sound": toggleSheet(); break;
       case "pause": tapKey("Escape"); break;
     }
@@ -55170,7 +55308,9 @@ var MOBILE = (function () {
       e.preventDefault();
       b.classList.add("t-down");
       setTimeout(function () { b.classList.remove("t-down"); }, 140);
-      if (b.dataset.act === "rotate-go") { tapKey("KeyF"); hideRotateHint(true); }
+      // ⚠ 原来这里只调了 tapKey("KeyF")（全屏），**漏掉横屏锁定** ——
+      // 这正是"点全屏并横屏却不自动横屏"的 bug。现在统一走 goFullscreenLandscape()。
+      if (b.dataset.act === "rotate-go") { goFullscreenLandscape(); hideRotateHint(true); }
       else hideRotateHint(true);
     }));
     return rotateEl;

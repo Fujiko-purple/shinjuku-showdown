@@ -1,0 +1,11 @@
+const { readFileSync } = require('fs');
+const s = readFileSync('src/fighters.js', 'utf8');
+const L = s.split(/\r?\n/);
+console.log('=== WALK_SPEED / RUN_SPEED 定义 ===');
+L.forEach((l, i) => { if (/WALK_SPEED|RUN_SPEED/.test(l)) console.log('L' + (i + 1) + ': ' + l.trim().slice(0, 140)); });
+console.log('');
+console.log('=== L3510-3560（速度驱动动画的完整逻辑）===');
+for (let i = 3509; i < 3560 && i < L.length; i++) console.log('L' + (i + 1) + ': ' + L[i].slice(0, 150));
+console.log('');
+console.log('=== spd 来源 ===');
+L.forEach((l, i) => { if (/\bspd\b|lastPos|speedNow|spNow/.test(l)) console.log('L' + (i + 1) + ': ' + l.trim().slice(0, 140)); });
