@@ -3263,6 +3263,13 @@
     let prevSpd = 0;               // 上一帧速率（算加速度 → 前后倾）
     let cmdMove = false;           // 本帧是否收到移动指令
     let gaitCd = 0;                // 步态切换冷却：防止 wantAnim 在阈值附近抖动导致每帧重起手
+    /**
+     * 只读诊断出口（window.__SS.gojo.dbg）。
+     * 动作状态是纯闭包变量，外部脚本看不到 —— 上几轮排查"动作僵硬"时，
+     * 只能靠猜 curName / curLoop / gaitCd 到底是几，浪费了大量时间。
+     */
+    const dbg = { mv: 0, want: 0, wantAnim: "", cd: 0, blocked: 0, sp: 0, gaitIn: 0 };
+    let cmdAge = 0;                // 连续多少次更新没有收到移动指令
     let turnVel = 0;               // 转身角速度 rad/s
     let leanRoll = 0;              // 转弯侧倾
     let leanPitch = 0;             // 加减速前后倾
@@ -3457,7 +3464,13 @@
       }
       if (flash > 0) setFlash(Math.max(0, flash - d * flashDecay));
       // ---- 松手惯性：不再"立刻钉死"，而是指数衰减滑一小段（约 20~30cm）----
-      if (!cmdMove) {
+      if (!cmdMove) cmdAge++; else cmdAge = 0;
+      /**
+       * 兜底：只有当"连续两次更新都没有收到移动指令"时才认为玩家真的松手了。
+       * 一帧内被更新两次时（历史上就发生过），第二次会看到 cmdMove 已被消耗，
+       * 若不加这道闸，速度会被反复衰减、步态动画会被刚切好就打回 idle。
+       */
+      if (!cmdMove && cmdAge >= 2) {
         const dec = Math.exp(-d / 0.062);
         vX *= dec; vZ *= dec;
         const spNow = Math.hypot(vX, vZ);
@@ -3596,6 +3609,8 @@
       if (len < 1e-4) return 0;
       moveDir.set(dx / len, 0, dz / len);
       const want = Math.max(0, speed);
+      dbg.mv++;
+      dbg.want = want;
       // 起步不再瞬间到全速：指数逼近，冲刺跟手更快、走位更有重量
       const tau = want > 6.5 ? 0.055 : 0.085;
       const k = 1 - Math.exp(-Math.max(dt, 1e-4) / tau);
@@ -3641,11 +3656,20 @@
          * 永远攒不到 0.1s —— 死锁，角色就以 idle 姿势滑行（实测抓到 0.7 秒的窗口）。
          * 冷却制不会死锁：最多 0.12s 切一次，且不需要目标连续稳定。
          */
-        if (gaitCd > 0) gaitCd -= Math.max(dt, 1e-4);
-        if (wantAnim !== curName && gaitCd <= 0) {
+        // 冷却只在"步态之间"切换时生效；从招式/防御这种非步态状态切回来必须立刻切，
+        // 否则出完招之后会有一段"以站姿滑行"的空窗（实测 0.4 秒量级）。
+        const inGait = curName === "walk" || curName === "run" || curName === "idle";
+        dbg.wantAnim = wantAnim;
+        dbg.cd = gaitCd;
+        dbg.sp = sp;
+        dbg.gaitIn = inGait ? 1 : 0;
+        if (wantAnim !== curName && (!inGait || gaitCd <= 0)) {
           play2(wantAnim, { loop: true });
           gaitCd = 0.12;
+        } else if (wantAnim !== curName) {
+          dbg.blocked++;
         }
+        if (gaitCd > 0) gaitCd -= Math.max(dt, 1e-4);
       }
       return step;
     };
@@ -3779,22 +3803,6 @@
       reset,
       setBlindfold,
       getYaw,
-      // 便捷只读
-      get quality() {
-        return opts && opts.quality ? opts.quality : "high";
-      },
-      get mode() {
-        return mode;
-      },
-      get guard() {
-        return guardOn;
-      },
-      get aura() {
-        return auraOn;
-      },
-      get domained() {
-        return domained;
-      },
       animNames: ANIM_NAMES.slice(),
       materials: src.mat,
       palette: src,
@@ -3806,6 +3814,25 @@
             for (const m of mats) if (m && m.dispose) m.dispose();
           }
         });
+      }
+    });
+    // 这些只读状态必须用 defineProperty，不能写进上面的 Object.assign 字面量：
+    // Object.assign 会求值取值器、把结果当普通属性拷进去，get mode() 只在创建时算一次，
+    // 之后 ctrl.mode 永远停在 "normal"、ctrl.guard 永远是 false，读到全是过期值。
+    Object.defineProperties(ctrl, {
+      quality: { get: () => (opts && opts.quality ? opts.quality : "high"), enumerable: true },
+      mode: { get: () => mode, enumerable: true },
+      guard: { get: () => guardOn, enumerable: true },
+      aura: { get: () => auraOn, enumerable: true },
+      domained: { get: () => domained, enumerable: true },
+      // 只读诊断出口：动作状态是闭包变量，外部脚本看不到，排查时全靠这个
+      dbg: {
+        get: () => ({
+          name: curName, loop: curLoop, ended, t: +curT.toFixed(3), blend: +blendT.toFixed(2),
+          mv: dbg.mv, want: +dbg.want.toFixed(2), wantAnim: dbg.wantAnim,
+          cd: +dbg.cd.toFixed(3), blocked: dbg.blocked, sp: +dbg.sp.toFixed(2), gaitIn: dbg.gaitIn
+        }),
+        enumerable: true
       }
     });
     reset();

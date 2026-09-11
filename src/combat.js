@@ -1275,6 +1275,14 @@
         kb: a.flow.kb * a.kbMul,
         kind: "melee",
         hitstop: a.flow.heavy ? TUNE.HITSTOP_HEAVY : TUNE.HITSTOP_LIGHT,
+        /**
+         * ⚠ 必须显式把"重击"标出来。
+         * 原来 `heavy` 的判据是 `h.dmg >= TUNE.HEAVY_DMG_LINE(150)`，
+         * 而玩家轻击 ~35、重击 ~60 —— **永远判不出重击**。
+         * 后果：重击和轻击走完全相同的反馈分支（同样的火花数量、同样的 0.3 震动、
+         * 同一个 hit_light 音效），玩家当然"感觉不到打在身上"。
+         */
+        heavyFlag: !!a.flow.heavy,
         noBlackFlash: a.skill === SKILL.BLACK_FLASH,
         finisher: !!a.flow.heavy || a.chainStage === 2
       });
@@ -1342,7 +1350,7 @@
         attacker.ce = Math.min(attacker.ceMax, attacker.ce + TUNE.CE_ON_HIT);
         attacker.hitCount++;
       }
-      const heavy = h.dmg >= TUNE.HEAVY_DMG_LINE || dmg >= TUNE.HEAVY_DMG_LINE * TUNE.INCOMING_SCALE;
+      const heavy = !!h.heavyFlag || h.dmg >= TUNE.HEAVY_DMG_LINE || dmg >= TUNE.HEAVY_DMG_LINE * TUNE.INCOMING_SCALE;
       let staggered = heavy || blackFlash || h.kind === "projectile";
       if (!staggered) {
         victim.poise -= 1;
@@ -1366,10 +1374,25 @@
       {
         const p = chest();
         const hs = h.hitstop !== void 0 ? h.hitstop : heavy ? TUNE.HITSTOP_HEAVY : TUNE.HITSTOP_LIGHT;
-        victim.ctrl.hitFlash(heavy ? 2 : 1);
-        cb.fx.hitSpark({ pos: p, color: guarded ? C.NEON_CYAN : C.GOLD, color2: C.WHITE, count: heavy ? 26 : 14, size: heavy ? 0.85 : 0.55, life: 0.3, speed: heavy ? 14 : 9 });
-        cb.fx.damageNumber({ pos: p, amount: Math.round(dmg), color: blackFlash ? C.GOLD : C.WHITE, crit: blackFlash, life: 0.9 });
-        cb.fx.screen({ shake: blackFlash ? 1.5 : heavy ? 0.75 : 0.3, freeze: hs, life: 0.25 });
+        victim.ctrl.hitFlash(heavy ? 2.2 : 1.4);
+        cb.fx.hitSpark({ pos: p, color: guarded ? C.NEON_CYAN : C.GOLD, color2: C.WHITE, count: heavy ? 44 : 26, size: heavy ? 1.05 : 0.72, life: 0.34, speed: heavy ? 18 : 12 });
+        cb.fx.damageNumber({ pos: p, amount: Math.round(dmg), color: blackFlash ? C.GOLD : heavy ? C.GOLD : C.WHITE, crit: blackFlash || heavy, life: 1 });
+        cb.fx.screen({ shake: blackFlash ? 1.8 : heavy ? 1.2 : 0.62, freeze: hs, life: 0.3 });
+        /**
+         * 方向性镜头冲量：命中瞬间把镜头沿"受击方向"顶一下再回弹。
+         * 全向震动只说明"有事发生"，只有方向性位移才能让玩家读到"这一拳是从哪儿打进去的"，
+         * 这就是格斗游戏里最直接的打击感来源。
+         * cam.panX/panZ 是相机模块的公开位移量，会按 exp 衰减自动回位。
+         */
+        if (cam && dmg >= 1) {
+          const kick = blackFlash ? 0.9 : heavy ? 0.55 : 0.3;
+          const dl = Math.hypot(dir.x, dir.z);
+          if (dl > 1e-4) {
+            cam.panX += (dir.x / dl) * kick;
+            cam.panZ += (dir.z / dl) * kick;
+          }
+        }
+        if (heavy || blackFlash) cb.fx.shockwave({ pos: p.clone(), maxRadius: blackFlash ? 20 : 8, color: heavy ? C.CRIMSON : C.GOLD, color2: C.WHITE, life: blackFlash ? 0.5 : 0.32, thickness: 0.45 });
         cb.audio.play(heavy ? "hit_heavy" : "hit_light", { volume: heavy ? 1 : 0.7 });
         if (guarded) cb.audio.play("block", { volume: 0.7 });
         cb.hitstop = Math.max(cb.hitstop, blackFlash ? TUNE.BLACK_FLASH_HITSTOP : hs);
@@ -2539,7 +2562,15 @@
         c.tick(d);
         if (c.vel.lengthSq() > 1e-4) cb.resolver.wallSmash(c, Math.hypot(c.vel.x, c.vel.z));
         c.syncState(c.moveIntent.lengthSq() > 0.01);
-        c.ctrl.update(d);
+        /**
+         * ⚠ 这里**不能再调 c.ctrl.update(d)**：main.js 的主循环在 combat.update() 之后
+         * 无条件调用 gojo.update(sdt) / sukuna.update(sdt)，也就是说角色每帧会被更新两次。
+         * 第二次更新时 cmdMove 已经被第一次消耗掉，于是：
+         *   1) 走/跑的速度每帧被指数衰减一次，实际速度只有设定值的零头；
+         *   2) "松开移动键回收步态动画"的分支被误触发，刚切好的 walk/run 下一帧就被打回 idle ——
+         *      表现就是"按了攻击/闪避之后走路变成以站姿滑行、动作僵硬不变"。
+         * 统一交给 main.js 的 gojo/sukuna.update 更新，一帧一次。
+         */
         c.p.copy(c.ctrl.getPos());
         if (c.infinityT <= 0 && c.infHandle) {
           if (c.infHandle.kill) c.infHandle.kill();
