@@ -6,16 +6,53 @@
    为什么整体 try/catch 且只在 http(s) 下注册：
      file:// 打开时浏览器会直接拒绝注册 SW；SW 只是增强项，
      注册失败绝不允许影响游戏本身，更不能污染控制台报错。
+   ------------------------------------------------------------------------
+   ⚠ 版本更新提示（2026-09 追加）：
+     sw.js 用构建时间戳做缓存名 + skipWaiting + clients.claim，所以新版 SW 会立刻接管，
+     **但已经打开的那个页面里跑的还是旧 game.js** —— 玩家会以为「我明明说的问题还是没修」。
+     这里监听 controllerchange / updatefound，发现换了控制者就提示一次并自动刷新一帧。
    ------------------------------------------------------------------------- */
 (function () {
   if (!('serviceWorker' in navigator)) return;
   if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+  var hadController = !!navigator.serviceWorker.controller;
+  var reloading = false;
+  function toast(msg) {
+    try {
+      var el = document.createElement('div');
+      el.textContent = msg;
+      el.style.cssText = 'position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:99999;' +
+        'padding:8px 16px;border-radius:10px;background:rgba(10,10,18,.92);color:#ffd873;' +
+        'font:13px/1.4 system-ui,sans-serif;letter-spacing:.06em;box-shadow:0 6px 24px rgba(0,0,0,.5);' +
+        'pointer-events:none;transition:opacity .3s';
+      document.body.appendChild(el);
+      setTimeout(function () { el.style.opacity = '0'; }, 2600);
+      setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 3200);
+    } catch (e) { /* 提示失败不影响游戏 */ }
+  }
   window.addEventListener('load', function () {
-    navigator.serviceWorker.register('sw.js', { scope: './' }).catch(function (e) {
+    navigator.serviceWorker.register('sw.js', { scope: './' }).then(function (reg) {
+      // 每次进游戏都主动问一次服务器有没有新版本，避免一直吃旧缓存
+      try { reg.update(); } catch (e) {}
+      reg.addEventListener('updatefound', function () {
+        var nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', function () {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) toast('发现新版本，正在更新…');
+        });
+      });
+    }).catch(function (e) {
       if (window.console && console.info) {
         console.info('[新宿决战] Service Worker 未注册（不影响游戏）:', e && e.message);
       }
     });
+  });
+  navigator.serviceWorker.addEventListener('controllerchange', function () {
+    // 只有「之前就有控制者」才刷新：第一次安装时刷新是多余的
+    if (!hadController || reloading) return;
+    reloading = true;
+    toast('已更新到最新版本，正在重新载入…');
+    setTimeout(function () { location.reload(); }, 600);
   });
 })();
 </script>
