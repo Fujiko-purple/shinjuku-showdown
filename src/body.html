@@ -341,13 +341,25 @@
   });
 
   /* ---- 3. 定时体检 ----
-   * 第一次判定从 4s 推迟到 9s（首次冷启动要下载 2.5MB 脚本 + 生成城市，4 秒远远不够），
-   * 并且脚本仍在下载时只给「仍在加载」的温和提示，不判死。 */
+   * ⚠ 这里修的是一个真实事故（用户截图实测）：
+   *   首屏要下载约 2.5MB 的 game.js，慢网络/首次访问时「页面已加载但主程序还没执行」
+   *   是**正常状态**，而旧版 4 秒就画上「主程序未能启动」，而且画出来就永不消失 ——
+   *   游戏随后明明正常起来了，玩家看到的却是一个盖在标题画面上的报错框。
+   * 现在分三档，且判定「还在下载中」用两个独立证据：
+   *   · BOOT.step 仍是初值「初始化」= 主脚本一行都还没跑（main.js 会一路更新它）
+   *   · 资源计时显示 game.js 尚未下载完成
+   * 两者任一成立就只给温和的「仍在加载」，绝不吓人。 */
   var CHECKS = [
-    { at: 9000, what: '主程序未能启动' },
-    { at: 32000, what: '初始化超时' },
+    { at: 9000, what: '仍在加载' },
+    { at: 32000, what: '启动超时' },
+    { at: 65000, what: '初始化超时' },
   ];
   var idx = 0;
+
+  /** 主脚本是否一行都没跑起来 */
+  function scriptNotStarted() {
+    return !BOOT.step || BOOT.step === '初始化';
+  }
 
   setInterval(function () {
     /* 主程序已启动：不管之前画过什么，一律撤掉 */
@@ -356,34 +368,39 @@
     var elapsed = Date.now() - BOOT.started;
     while (idx < CHECKS.length && elapsed >= CHECKS[idx].at) {
       var c = CHECKS[idx];
-      /* 只是还在下载脚本 —— 慢，不是坏。给温和提示，不再升级成「无法启动」 */
-      if (c.what === '主程序未能启动' && gameScriptLoading()) {
-        idx++;
-        render('仍在加载', '游戏脚本（约 2.5MB）还在下载中，首次访问会慢一些。<br>' +
-          '请再等一会儿；若超过 30 秒仍未进入，刷新页面重试即可。');
-        continue;
-      }
       idx++;
       var detail;
-      if (c.what === '主程序未能启动') {
-        detail =
-          '浏览器已加载页面，但 <code>src/main.js</code> 没有执行。常见原因：<br>' +
-          '· <b>用 file:// 直接打开了 html</b>（请改用 <code>启动游戏.bat</code>）<br>' +
-          '· 服务器没有真正在跑（确认命令行里出现了 <code>新宿决战 → http://127.0.0.1:8173/</code>）<br>' +
-          '· 浏览器插件 / 隐私模式拦截了模块脚本，可换一个浏览器或用无痕窗口试<br>' +
-          '· 端口 8173 被别的程序占用，换端口：<code>node serve.mjs 9000</code><br><br>' +
-          '当前地址：<code>' + esc(location.href) + '</code>' +
-          (BOOT.err ? '<br>捕获到的错误：<code>' + esc(BOOT.err) + '</code>' : '');
-      } else {
-        detail =
+      if (c.what === '仍在加载') {
+        /* 只是慢，不是坏 —— 温和提示，不判死 */
+        render('仍在加载', '首次访问要下载约 2.5MB 的游戏脚本，慢一些是正常的。<br>' +
+          '请再等一会儿，进度会继续往下走；若一分多钟仍未进入，刷新页面重试即可。');
+        continue;
+      }
+      if (c.what === '启动超时') {
+        if (scriptNotStarted() || gameScriptLoading()) {
+          render('仍在加载', '游戏脚本还没下载完（或还没执行），网络比较慢。<br>' +
+            '进度会继续往下走；若一分多钟仍未进入，刷新页面重试即可。');
+          continue;
+        }
+        /* 脚本已经在跑，只是卡在某一步 */
+        render('初始化超时',
           '初始化卡在「<b>' + esc(BOOT.step) + '</b>」这一步超过 ' +
           Math.round(elapsed / 1000) + ' 秒。<br><br>' +
           '可以尝试：<br>' +
           '· 用 <code>?q=low</code> 强制最低画质：<a href="?q=low">点这里</a><br>' +
           '· 如果显卡驱动较旧，再叠加 <code>&amp;post=0</code>：<a href="?q=low&post=0">点这里</a><br>' +
-          '· 刷新页面重试（首次生成城市较慢，但不应超过 30 秒）' +
-          (BOOT.err ? '<br>捕获到的错误：<code>' + esc(BOOT.err) + '</code>' : '');
+          '· 刷新页面重试' +
+          (BOOT.err ? '<br>捕获到的错误：<code>' + esc(BOOT.err) + '</code>' : ''));
+        continue;
       }
+      /* 65 秒都没起来：这时才是真的有问题，给出完整诊断 */
+      detail =
+        '页面已加载，但游戏主脚本超过一分钟仍未执行。常见原因：<br>' +
+        '· <b>网络太慢或中断</b>（首次要下载约 2.5MB 脚本，请刷新重试）<br>' +
+        '· <b>用 file:// 直接打开了 html</b>（请改用 <code>启动游戏.bat</code>）<br>' +
+        '· 浏览器插件 / 隐私模式拦截了脚本，可换浏览器或用无痕窗口试<br><br>' +
+        '当前地址：<code>' + esc(location.href) + '</code>' +
+        (BOOT.err ? '<br>捕获到的错误：<code>' + esc(BOOT.err) + '</code>' : '');
       render(c.what, detail);
     }
   }, 800);
