@@ -480,8 +480,10 @@
       else if (this.action && !this.action.done) s.phase = this.action.flow.melee ? "attack" : "cast";
       else if (this.stunT > 0) s.phase = "hit";
       else if (this.guarding) s.phase = "guard";
-      else if (moving) s.phase = "move";
-      else s.phase = "idle";
+      else if (moving) {
+        /** 疾跑模块可以把 move 细分成 walk/run/sprint（返回 true = 它自己写了 s.phase） */
+        s.phase = runHook("locomotion", this.combat, this, { moving }) ? s.phase : "move";
+      } else s.phase = "idle";
     }
   };
   function playAnim(ctrl, name, opts) {
@@ -864,9 +866,12 @@
   }
   function spawnFurnaceField(cb, owner, from, targetPos) {
     const speed = 40;
-    const dir = new Vector3(targetPos.x - from.x, 0, targetPos.z - from.z);
+    let dir = new Vector3(targetPos.x - from.x, 0, targetPos.z - from.z);
     if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
     dir.normalize();
+    /** 对空：机制模块可以按目标高度改写弹道方向（魔虚罗悬空时只有术式打得到） */
+    const aimF = firstHook("aim", cb, owner, from, dir, SKILL.FURNACE);
+    if (aimF && aimF.isVector3) dir = aimF.clone().normalize();
     const to = from.clone().addScaledVector(dir, 60).setY(1.2);
     const field = {
       kind: "furnace",
@@ -885,7 +890,10 @@
           cb.fx.debris({ pos: field.pos.clone(), count: 20, power: 16, color: C.NEON_AMBER });
           cb.audio.play("furnace", { volume: 0.6 });
           cb.grid.destroyAlongSegment(field.pos, field.pos, 9, cb.fx, cb.audio);
-          if (!foe.dead && cb.resolver.segmentHitsTarget(field.pos, field.pos, 6, foe)) {
+          const eaten = runHook("segment", cb, field.pos, field.pos, 6, {
+            skill: SKILL.FURNACE, owner, kind: "projectile", dmg: SKILL_DATA[SKILL.FURNACE].dmg
+          });
+          if (!eaten && !foe.dead && cb.resolver.segmentHitsTarget(field.pos, field.pos, 6, foe)) {
             cb.resolver.apply({
               from: owner,
               to: foe,
@@ -907,6 +915,9 @@
     return field;
   }
   function spawnBlueField(cb, owner, pos, dir) {
+    /** 对空：机制模块可以把苍的引力球往空中目标送 */
+    const aimB = firstHook("aim", cb, owner, pos, dir, SKILL.BLUE);
+    if (aimB && aimB.isVector3) dir = aimB.clone().normalize();
     const field = {
       kind: "blue",
       t: 0,
@@ -926,6 +937,13 @@
         if (distXZ(field.pos, target.p) > 9) field.pos.addScaledVector(field.dir, 14 * dt);
         if (field.handle && field.handle.setPos) field.handle.setPos(field.pos);
         cb.fx.sphere({ pos: field.pos.clone(), radius: 1.2, color: C.AZURE, coreColor: C.CYAN, life: 0.1, charge: 0.6, distort: 0.5 });
+        /**
+         * 额外命中检测（魔虚罗之类不在 fighters 表里的目标）。
+         * 苍是持续场，命中后继续存在，所以这里刻意忽略返回值。
+         */
+        runHook("segment", cb, field.pos, field.pos, 2.4, {
+          skill: SKILL.BLUE, owner, kind: "projectile", dmg: 0, continuous: true
+        });
         const d = distXZ(field.pos, target.p);
         if (d < 26 && !target.dead) {
           const pull = _v13.subVectors(owner.p, target.p).setY(0);
@@ -950,6 +968,9 @@
     return field;
   }
   function spawnRedField(cb, owner, pos, dir) {
+    /** 对空：赫可以被掰向空中的目标 */
+    const aimR = firstHook("aim", cb, owner, pos, dir, SKILL.RED);
+    if (aimR && aimR.isVector3) dir = aimR.clone().normalize();
     const speed = SKILL_DATA[SKILL.RED].range * 0.65;
     const field = {
       kind: "red",
@@ -972,7 +993,11 @@
         cb.grid.destroyAlongSegment(field.prev, field.pos, 4.5, cb.fx, cb.audio);
         const target = cb.fighters[cb.other(owner.side)];
         let detonated = false;
-        if (!target.dead && cb.resolver.segmentHitsTarget(field.prev, field.pos, 1.5, target)) {
+        const eatenByHook = runHook("segment", cb, field.prev, field.pos, 1.5, {
+          skill: SKILL.RED, owner, kind: "projectile", dmg: SKILL_DATA[SKILL.RED].dmg
+        });
+        if (eatenByHook) detonated = true;
+        else if (!target.dead && cb.resolver.segmentHitsTarget(field.prev, field.pos, 1.5, target)) {
           cb.resolver.apply({
             from: owner,
             to: target,
@@ -1010,7 +1035,10 @@
     const power = d.dmg * lerp3(TUNE.PURPLE_CHARGE_MIN_RATIO, 1, ratio);
     const from = a.actor.ctrl.handR.getWorldPosition(new Vector3());
     const len = is200 ? 260 : Math.min(d.range, lerp3(60, 120, ratio));
-    const to = from.clone().addScaledVector(a.forward, len);
+    /** 对空：机制模块可以把茈掰到空中目标上（这是唯一能稳定打到悬空魔虚罗的手段之一） */
+    const aimP = firstHook("aim", cb, a.actor, from, a.forward, is200 ? SKILL.PURPLE_200 : SKILL.PURPLE);
+    const pdir = aimP && aimP.isVector3 ? aimP.clone().normalize() : a.forward;
+    const to = from.clone().addScaledVector(pdir, len);
     a.data.from = from.clone();
     a.data.to = to.clone();
     a.data.power = power;
@@ -1034,14 +1062,17 @@
     if (!is200) cb.banner(ratio > 0.9 ? "虚式「茈」 全力" : "虚式「茈」", 0.9);
     cb.audio.play(is200 ? "purple200_fire" : "purple_fire");
     cb.audio.duck();
-    if (!a.target.dead) {
+    const eatenByHook = runHook("segment", cb, from, to, 1.8, {
+      skill: is200 ? SKILL.PURPLE_200 : SKILL.PURPLE, owner: a.actor, kind: "projectile", dmg: power
+    });
+    if (!eatenByHook && !a.target.dead) {
       if (cb.resolver.segmentHitsTarget(from, to, 1.8, a.target)) {
         cb.resolver.apply({
           from: a.actor,
           to: a.target,
           skill: is200 ? SKILL.PURPLE_200 : SKILL.PURPLE,
           dmg: power,
-          dir: _v13.copy(a.forward),
+          dir: _v13.copy(pdir),
           kb: is200 ? 16 : 10,
           kind: "projectile",
           unblockable: true,
@@ -1071,6 +1102,8 @@
       const flow = this.flows[skill];
       const actor = cb.fighters[side];
       if (!flow || !actor || actor.dead) return null;
+      /** 出招拦截：机制模块可以吃掉某次出招（例如黑闪把 V 当同步键而不是招式） */
+      if (!opts.force && firstHook("beforeCast", cb, actor, skill) === false) return null;
       const target = cb.fighters[cb.other(side)];
       const stage = opts.chainStage | 0;
       const a = {
@@ -1270,6 +1303,16 @@
       if (!hand) return false;
       hand.getWorldPosition(_sc);
       _sd.copy(_sc).addScaledVector(a.forward, range * 0.85);
+      /**
+       * 机制模块的命中扫掠（魔虚罗悬空时近战够不到、俯冲落地才吃判定）。
+       * 用 clone 传出去：钩子内部大概率会调 cb.resolver.apply，而 _sc/_sd 是模块级临时变量。
+       */
+      if (runHook("segment", cb, _sc.clone(), _sd.clone(), a.flow.hitR, {
+        skill: a.skill, owner: a.actor, kind: "melee", dmg: a.flow.dmg * a.dmgMul, attack: a
+      })) {
+        a.hitLanded = true;
+        return true;
+      }
       this.capsule(target, _sa, _sb);
       const rr2 = a.flow.hitR + CAPSULE_R;
       if (segSegDistSq(_sc, _sd, _sa, _sb) > rr2 * rr2) return false;
@@ -1337,19 +1380,43 @@
       if (victim.side === SIDE.SUKUNA && cb.sukunaPhase() >= 3 && h.kind !== "domain") dmg *= cb.adaptMul(h.skill);
       if (attacker && attacker.side === SIDE.SUKUNA) dmg *= cb.ai.damageMul * TUNE.BOSS_DMG_SCALE;
       dmg *= TUNE.INCOMING_SCALE;
+      /**
+       * 机制乘区（魔虚罗庇护等）：钩子按注册顺序拿到当前值，返回数字则替换。
+       * 放在 Math.max(1, …) 之前，这样减伤能把伤害真正压到 1。
+       */
+      dmg = gateHook("damageGate", dmg, cb, h);
       dmg = Math.max(1, dmg);
       let blackFlash = false;
+      /** 黑闪的伤害倍率。0 = 走旧行为（固定加算），由机制模块决定用哪种。 */
+      let bfMul = 0;
       if (h.kind === "melee" && attacker && attacker.side === SIDE.GOJO && !h.noBlackFlash) {
-        if (h.finisher && cb.bfWindowUntil > cb.time && cb.bfCd <= 0) {
-          blackFlash = true;
-          cb.bfWindowUntil = 0;
-          cb.bfCd = TUNE.BLACK_FLASH_CD;
-          cb.bfCount++;
-        } else if (!h.finisher) {
-          cb.bfWindowUntil = cb.time + TUNE.BLACK_FLASH_WINDOW;
+        /**
+         * 黑闪判定委托给机制模块（src/blackflash.js）。
+         * 返回 undefined → 模块缺席，走旧逻辑（0.28s 窗口内接终结技）；
+         * 返回数字 → 该数字是本次命中的伤害倍率（原作是 2.5 倍）；
+         * 返回布尔 → true 时用 2.5 倍。
+         */
+        const jr = firstHook("blackFlash", cb, h, dmg);
+        if (jr === void 0 || jr === null) {
+          if (h.finisher && cb.bfWindowUntil > cb.time && cb.bfCd <= 0) {
+            blackFlash = true;
+            cb.bfWindowUntil = 0;
+            cb.bfCd = TUNE.BLACK_FLASH_CD;
+            cb.bfCount++;
+          } else if (!h.finisher) {
+            cb.bfWindowUntil = cb.time + TUNE.BLACK_FLASH_WINDOW;
+          }
+        } else if (typeof jr === "number") {
+          blackFlash = jr > 0;
+          bfMul = jr;
+        } else {
+          blackFlash = !!jr;
+          bfMul = blackFlash ? 2.5 : 0;
         }
       }
-      if (blackFlash) dmg += SKILL_DATA[SKILL.BLACK_FLASH].dmg * TUNE.INCOMING_SCALE;
+      if (blackFlash) {
+        dmg = bfMul > 0 ? dmg * bfMul : dmg + SKILL_DATA[SKILL.BLACK_FLASH].dmg * TUNE.INCOMING_SCALE;
+      }
       victim.hp = Math.max(0, victim.hp - dmg);
       victim.gainDomain(TUNE.DOMAIN_ON_TAKE);
       if (attacker) {
@@ -1424,6 +1491,7 @@
         cb.pushEvent({ type: "blackflash", amount: Math.round(dmg), combo: cb.combo });
       }
       cb.onHitLanded(attacker, victim, dmg, blackFlash);
+      runHook("onHitDone", cb, h, dmg, { blackFlash, guarded });
       cb.pushEvent({ type: "hit", side: attacker ? attacker.side : null, target: victim.side, skill: h.skill, amount: Math.round(dmg), heavy, guarded, blackFlash });
       if (victim.hp <= 0) cb.onDeath(victim);
       return true;
@@ -1683,7 +1751,8 @@
     constructor(combat2) {
       this.combat = combat2;
       this.state = { [SIDE.GOJO]: null, [SIDE.SUKUNA]: null };
-      this.clash = new DomainClash(combat2);
+      /** 领域对决：机制模块注册工厂就换成它的实现，否则用默认的连点拉锯 */
+      this.clash = firstHook("clash", combat2) || new DomainClash(combat2);
       this.clashHandle = null;
       this._endGuard = false;
       this._dotT = 0;
@@ -2214,6 +2283,18 @@
     const wheel = new MahoragaWheel(scene2);
     const cb = {
       time: 0,
+      /** 帧计数。黑闪的「命中帧 ±1 帧」判定用它而不是时间：hitstop 期间 dt=0，
+       *  时间会停住，帧号不会 —— 判帧必须落在帧上才可复现。 */
+      frame: 0,
+      /** >0 时双方冻结（魔虚罗召唤等阶段演出由机制模块自己写这个值） */
+      phaseLock: 0,
+      /** 每个按键最近一次「按下边沿」的帧号（机制模块读它做精确判定） */
+      pressFrame: {
+        light: -999, heavy: -999, blue: -999, red: -999, purple: -999, heal: -999,
+        dodge: -999, dash: -999, domain: -999, lockOn: -999, charge: -999, v: -999, mouse: -999
+      },
+      /** 本帧按键边沿（机制模块读；每帧换对象前的同一个引用） */
+      edges: null,
       mode: "fight",
       resultLocked: false,
       hitstop: 0,
@@ -2230,6 +2311,7 @@
       fx: fx2,
       weapons: weapons2,
       audio: audio2,
+      cam: camRef,
       runner: null,
       resolver: null,
       domains: null,
@@ -2345,7 +2427,12 @@
     cb.domains = new DomainRunner(cb);
     cb.ai = new SukunaAI(cb);
     cb.ai.setDifficulty(1);
-    const BTN = ["light", "heavy", "blue", "red", "purple", "heal", "dodge", "dash", "domain", "lockOn", "charge"];
+    /**
+     * v = 黑闪「咒力同步」键（键盘 V）。
+     * 它不驱动任何招式，只是把「玩家在这一帧主动注入了咒力」这件事记下来，
+     * 交给 src/blackflash.js 判定「命中帧 ±1 帧」。
+     */
+    const BTN = ["light", "heavy", "blue", "red", "purple", "heal", "dodge", "dash", "domain", "lockOn", "charge", "v"];
     const cur = emptyInput();
     const prev = emptyInput();
     const edges = { mouse: false };
@@ -2477,7 +2564,12 @@
         if (actNow && !actNow.done) {
           moveMul = actNow.phase === "active" ? 0.18 : actNow.phase === "recover" ? 0.45 : 0.32;
         }
-        const sp = (inp.dash ? TUNE.DASH_SPEED : TUNE.MOVE_SPEED) * moveMul;
+        /**
+         * 疾跑模块的乘区：它自己维护起步加速/惯性曲线，返回 1 就等价于改前行为。
+         * （只有真正在动的时候才会被调用，所以模块还需要自己用 HOOKS.tick 做减速衰减。）
+         */
+        const spMul = gateHook("move", 1, cb, pl, { mx, mz, mag, dash: !!inp.dash }, dt, inp);
+        const sp = (inp.dash ? TUNE.DASH_SPEED : TUNE.MOVE_SPEED) * moveMul * spMul;
         pl.ctrl.moveTowards(pl.p.x + mx * 14, pl.p.z + mz * 14, sp, dt);
         pl.moveIntent.set(mx, 0, mz);
         if (inp.dash && Math.random() < 0.08) audio2.play("dash", { volume: 0.3 });
@@ -2555,8 +2647,12 @@
     }
     function update2(input, dt, t) {
       const d = clamp6(Number(dt) || 0, 0, 0.05);
+      cb.frame++;
       cb.events.length = 0;
       readInput(input);
+      cb.edges = edges;
+      /** 记录每个按键的「按下帧」：精确判定（黑闪）用帧号，不用时间 —— 顿帧的 dt=0 不会让它漂 */
+      for (const k in edges) if (edges[k]) cb.pressFrame[k] = cb.frame;
       const pl = cb.fighters[SIDE.GOJO];
       const sk = cb.fighters[SIDE.SUKUNA];
       if (cb.hitstop > 0) {
@@ -2567,8 +2663,14 @@
       }
       cb.time += d;
       cb.bfCd = Math.max(0, cb.bfCd - d);
-      if (!cb.inputLocked()) updatePlayer(d, cur);
-      cb.ai.update(d, cb.time);
+      /**
+       * 阶段演出（魔虚罗召唤等）：机制模块把 phaseLock 置正，这里冻结双方输入与 AI，
+       * 但世界照常跑 —— 场、领域、特效、模块自己的 tick 全都照常。
+       */
+      const frozen = cb.phaseLock > 0;
+      if (frozen) cb.phaseLock = Math.max(0, cb.phaseLock - d);
+      if (!frozen && !cb.inputLocked()) updatePlayer(d, cur);
+      if (!frozen) cb.ai.update(d, cb.time);
       cb.runner.update(d);
       updateFields(d);
       cb.domains.update(d, edges);
@@ -2630,6 +2732,8 @@
         }
       }
       for (const c of [pl, sk]) if (!c.dead && c.hp <= 0) cb.onDeath(c);
+      /** 机制模块的每帧驱动（魔虚罗 AI、领域同步轴、疾跑衰减…） */
+      runHook("tick", cb, d, cb.time);
       savePrev();
     }
     const SKILL_BAR = [SKILL.BLUE, SKILL.RED, SKILL.PURPLE, SKILL.REVERSE, SKILL.DOMAIN_VOID];
@@ -2768,6 +2872,8 @@
       /** 完全复位：血量 / 位置 / CD / 领域 / 建筑 / 特效 */
       reset() {
         cb.time = 0;
+        cb.frame = 0;
+        cb.phaseLock = 0;
         cb.resultLocked = false;
         cb.mode = "fight";
         cb.hitstop = 0;
@@ -2813,6 +2919,8 @@
         }
         grid.resetStats();
         wheel.reset();
+        /** 机制模块的复位（魔虚罗退场、同步轴归零、黑闪连闪清零、疾跑状态归零） */
+        runHook("reset", cb);
         fx2.clear();
         weapons2.clear();
         if (prev) {
@@ -2844,8 +2952,33 @@
       tutorialHint(kind, on) {
         if (kind in cb.hintFlags) cb.hintFlags[kind] = !!on;
         if (!on) delete cb.hinted[kind];
+      },
+      /* ---- 只读诊断口：探针/机制模块用它读主循环内部状态 ---- */
+      get frame() {
+        return cb.frame;
+      },
+      get pressFrame() {
+        return cb.pressFrame;
+      },
+      get edges() {
+        return cb.edges;
+      },
+      get phaseLock() {
+        return cb.phaseLock;
+      },
+      /** 阶段演出开关（机制模块也可以直接把 cb.phaseLock 写成正数） */
+      set phaseLock(v) {
+        cb.phaseLock = Math.max(0, Number(v) || 0);
+      },
+      get mode() {
+        return cb.mode;
+      },
+      get fields() {
+        return cb.fields;
       }
     };
+    /** 机制模块的构建钩子：此刻 cb 已完整（runner/resolver/domains/ai 都在） */
+    runHook("combatInit", cb);
     api.reset();
     cb.mode = "fight";
     cb.bannerText = "";

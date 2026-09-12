@@ -197,16 +197,28 @@ export class Browser {
    * 另外对 '`L`' 这种只给字母的写法做了补全（自动补成 KeyL）。
    */
   static resolveKey(keyName) {
-    const map = {
-      Space: [' ', 'Space', 32, ' '],          // key 必须是 ' '，text 用于 keyDown
-      KeyJ: ['j','KeyJ',74], KeyK: ['k','KeyK',75],
-      KeyW: ['w','KeyW',87], KeyA: ['a','KeyA',65], KeyS: ['s','KeyS',83], KeyD: ['d','KeyD',68],
-      KeyU: ['u','KeyU',85], KeyI: ['i','KeyI',73], KeyO: ['o','KeyO',79],
-      KeyH: ['h','KeyH',72], KeyG: ['g','KeyG',71], KeyL: ['l','KeyL',76],
-      KeyP: ['p','KeyP',80], KeyR: ['r','KeyR',82], KeyF: ['f','KeyF',70], KeyQ: ['q','KeyQ',81],
-      Escape: ['Escape','Escape',27], ShiftLeft: ['Shift','ShiftLeft',16],
-      Digit1: ['1','Digit1',49], Digit2: ['2','Digit2',50], Digit3: ['3','Digit3',51],
-    };
+    /**
+     * 完整字母表：早期只手写了用到的键，漏掉的键会退化成 [name,name,0]，
+     * 也就是 code 变成 'V' 而不是 'KeyV' —— 而游戏判的是 e.code === "KeyV"，
+     * 探针会**静默失效**（按键事件发出去了，游戏完全没反应）。
+     * 黑闪新增了同步键 V，必须先把这张表补全。
+     */
+    const LETTERS = {};
+    for (let i = 0; i < 26; i++) {
+      const ch = String.fromCharCode(65 + i);
+      LETTERS['Key' + ch] = [ch.toLowerCase(), 'Key' + ch, 65 + i];
+    }
+    const map = Object.assign({
+      Space: [' ', 'Space', 32, ' '],
+      Escape: ['Escape', 'Escape', 27],
+      ShiftLeft: ['Shift', 'ShiftLeft', 16],
+      ShiftRight: ['Shift', 'ShiftRight', 16],
+      Tab: ['Tab', 'Tab', 9], Enter: ['Enter', 'Enter', 13],
+      Comma: [',', 'Comma', 188], Period: ['.', 'Period', 190],
+      Semicolon: [';', 'Semicolon', 186], Slash: ['/', 'Slash', 191],
+      Backslash: ['\\', 'Backslash', 220], Minus: ['-', 'Minus', 189]
+    }, LETTERS);
+    for (let i = 0; i <= 9; i++) map['Digit' + i] = [String(i), 'Digit' + i, 48 + i];
     let hit = map[keyName];
     if (!hit && /^[A-Za-z]$/.test(keyName)) hit = map['Key' + keyName.toUpperCase()];
     if (!hit && /^[0-9]$/.test(keyName)) hit = map['Digit' + keyName];

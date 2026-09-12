@@ -172,6 +172,11 @@ function hudBuildHints() {
  * 只做 main.js 没做的事；所有写入都先用缓存值比较，避免每帧无谓的 DOM 写。
  */
 function hudTick(dt, snap) {
+  /**
+   * 机制模块的 HUD（魔虚罗血条 / 领域同步轴 / 黑闪提示）—— 它们各自建自己的 DOM，
+   * 不依赖本文件的 HUD 结构，所以放在最前面、早退分支之前也要跑到。
+   */
+  runHook("hud", dt, snap);
   if (!HUD.ready) hudInit();
   if (!HUD.el) return;
   var fighting = state === "fight" || state === "clash" || state === "victory" || state === "defeat";

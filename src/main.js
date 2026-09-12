@@ -92,6 +92,26 @@
   window.addEventListener("blur", () => {
     for (const k in keys) keys[k] = false;
   });
+  /**
+   * 按键注入口（调试 / 探针 / 触屏自建按钮用）。
+   * mobile.js 是直接写 keys / freshKeys 的，这里给机制模块一条同样的口子：
+   * 黑闪模块在触屏上自建「咒」按钮，按下时注入 KeyV，不必去改 mobile.js。
+   */
+  window.__INJECT = {
+    press(code) {
+      if (!code) return;
+      keys[code] = true;
+      freshKeys.add(code);
+      try {
+        onKeyDown(code);
+      } catch (e) {
+        console.warn("[inject] onKeyDown 抛错:", e);
+      }
+    },
+    release(code) {
+      if (code) keys[code] = false;
+    }
+  };
   var mouse = { x: 0, y: 0, left: false, right: false, wheel: 0, moved: false, lastMoveT: 0 };
   var canvas = $("gl");
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -908,6 +928,8 @@
     inputSnapshot.dash = !!(k.ShiftLeft || k.ShiftRight);
     inputSnapshot.purple = !!k.KeyO;
     inputSnapshot.charge = !!k.KeyL;
+    /** V = 黑闪「咒力同步」键（见 src/blackflash.js）：只在按下的那一帧为 true */
+    inputSnapshot.v = freshKeys.has("KeyV");
     inputSnapshot.mouse.x = mouse.x;
     inputSnapshot.mouse.y = mouse.y;
     inputSnapshot.mouse.pressed = mouse.left;
@@ -1214,6 +1236,32 @@ clash=${snap.clashActive} mode=${snap.mode} cam=${cam.dist.toFixed(0)}`;
     },
     get stats() {
       return stats2;
+    },
+    /** 机制模块（占位模块时是 null）—— 探针与 HUD 用它读内部状态 */
+    get mahoraga() {
+      return typeof MahoragaPhase !== "undefined" ? MahoragaPhase : null;
+    },
+    get blackFlash() {
+      return typeof BlackFlash !== "undefined" ? BlackFlash : null;
+    },
+    get hooks() {
+      return HOOKS;
+    },
+    /** 四个机制模块的自报状态（注册表在 contract.js 的 MECH_DEBUG） */
+    get mech() {
+      const out = {};
+      for (const k in MECH_DEBUG) {
+        try {
+          out[k] = typeof MECH_DEBUG[k] === "function" ? MECH_DEBUG[k]() : MECH_DEBUG[k];
+        } catch (e) {
+          out[k] = { error: String(e) };
+        }
+      }
+      return out;
+    },
+    /** 领域对决实例（默认 DomainClash 或机制模块的实现） */
+    get duel() {
+      return combat && combat.domains ? combat.domains.clash : null;
     }
   };
 })();
