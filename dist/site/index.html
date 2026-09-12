@@ -28,7 +28,8 @@
 <!-- ============================ 背景音乐 ============================
      整轨配乐，首次交互后自动循环播放（浏览器不允许无交互自动播放）。
      音量跟随 HUD 的「乐」滑块。单文件构建会把音频内联成 data URI。 -->
-<audio id="bgm" loop preload="auto" preload="none" data-src="assets/bgm.m4a" data-page-node-id="OKB9c9x90LeoUhyXOsewad"></audio>
+<audio id="bgm" loop preload="none" data-src="assets/bgm.m4a" data-page-node-id="OKB9c9x90LeoUhyXOsewad"></audio>
+<audio id="bgm2" loop preload="none" data-src="assets/bgm2.m4a"></audio>
 
 <!-- ============================ 3D 画布 ============================ -->
 <canvas id="gl" aria-label="新宿决战 3D 战场" data-page-node-id="1TAeXaBdbW0XewyZxIYRQD"></canvas>
@@ -142,17 +143,10 @@
     <div class="cine-skip" data-page-node-id="b2rRmDhOUI7wmaELCAnEa3">按 <b data-page-node-id="jvIyzF1CaYFsaEAA1Brx8J">空格</b> 跳过</div>
   </div>
 
-  <!-- 音量：默认收在右下角一枚按钮里，点开才展开（战斗中不常驻挡视野） -->
-  <div class="audio-dock">
-    <button id="audio-toggle" class="audio-toggle" type="button" aria-label="音量设置">♪</button>
-    <div class="audio-panel" data-page-node-id="XJ2Em1gcDY39YJOOaW7ggK">
-    <label data-page-node-id="ctxZrJKn3618DpbHBKAxB6">音<i id="vol-master-label" data-page-node-id="z11my6pZlLqBXi5bOpuCBn">70</i><input id="vol-master" type="range" min="0" max="100" value="70" data-page-node-id="tuCwnDrd07v2xdkgP0fbzU"></label>
-    <label data-page-node-id="QuX1St52vMiJ1kfIEK56DY">乐<i id="vol-music-label" data-page-node-id="uBa3n9V8Cf5mepV2BqD4X3">55</i><input id="vol-music" type="range" min="0" max="100" value="55" data-page-node-id="Kb9jKlYZYbdMS0Zn93pFFc"></label>
-      <div class="bgm-pick hidden" id="bgm-pick" role="group" aria-label="背景音乐"></div>
-      <label data-page-node-id="YHrmb7NZ2vU0HePzPtBHbi">效<i id="vol-sfx-label" data-page-node-id="K2yHlEpnFAjZmZYtu0cXLA">85</i><input id="vol-sfx" type="range" min="0" max="100" value="85" data-page-node-id="Vi0WTRMjnEU63S5AOQPcuD"></label>
-    </div>
-  </div>
+  <!-- 音量 / BGM 切换留在 #hud 里面的话，标题界面（#hud 被 hidden）就没法调音量、也没法选歌。
+       现在把它提到 #hud 的兄弟位置，任何界面（标题 / 战斗 / 暂停 / 结算）都能用。 -->
 </div>
+
 
 <!-- ============================ 标题界面 ============================ -->
 <div id="title" class="screen" data-page-node-id="xCZAKX9egvbKCXKHGNdMoS">
@@ -371,31 +365,66 @@
 })();
 </script>
 
+  <!-- 音量：默认收在右下角一枚按钮里，点开才展开（战斗中不常驻挡视野） -->
+  <div class="audio-dock">
+    <button id="audio-toggle" class="audio-toggle" type="button" aria-label="音量设置">♪</button>
+    <div class="audio-panel" data-page-node-id="XJ2Em1gcDY39YJOOaW7ggK">
+    <label data-page-node-id="ctxZrJKn3618DpbHBKAxB6">音<i id="vol-master-label" data-page-node-id="z11my6pZlLqBXi5bOpuCBn">70</i><input id="vol-master" type="range" min="0" max="100" value="70" data-page-node-id="tuCwnDrd07v2xdkgP0fbzU"></label>
+    <label data-page-node-id="QuX1St52vMiJ1kfIEK56DY">乐<i id="vol-music-label" data-page-node-id="uBa3n9V8Cf5mepV2BqD4X3">55</i><input id="vol-music" type="range" min="0" max="100" value="55" data-page-node-id="Kb9jKlYZYbdMS0Zn93pFFc"></label>
+      <div class="bgm-pick hidden" id="bgm-pick" role="group" aria-label="背景音乐"></div>
+
 <script>
-/* --- BGM 懒加载（站点版专用）：首屏绝不拉 2.7MB 音频，首次真实交互才请求 ---- */
+/* --- BGM 懒加载（站点版专用）-----------------------------------------------
+   首屏绝不拉音频（两首加起来 5.3MB）。只有玩家**第一次真实交互**时，
+   才开始下载「当前选中」的那一首；切歌时才按需拉另一首。
+
+   职责收敛：这里只负责「把 src 挂上，让音频开始下载」，**不负责播放**。
+   播放统一交给 main.js 的 startBGM（它在冒泡阶段跑，并且带失败重试）。
+   之前这里也调 play()，两处逻辑重复且失败处理不一致，真出问题时分不清是谁没出声。
+
+   window.__BGM_LOAD(id) 是给 main.js 切歌用的入口：
+   单文件版没有 data-src（音频本来就是内联的），这个函数不存在，main.js 会安全跳过。
+   ------------------------------------------------------------------------ */
 (function () {
-  var el = document.getElementById('bgm');
-  if (!el || !el.dataset || !el.dataset.src) return;
+  var els = document.querySelectorAll('audio[data-src]');
+  if (!els.length) return;
+  var map = {};
+  for (var i = 0; i < els.length; i++) map[els[i].id] = els[i];
+
+  window.__BGM_LOAD = function (id) {
+    var el = map[id];
+    if (!el) return false;
+    if (!el.getAttribute('src')) {
+      el.src = el.dataset.src;
+      try { el.load(); } catch (e) { /* 少数浏览器 load() 会抛，忽略 */ }
+    }
+    return true;
+  };
+
+  // 选中项：优先读上次的选择，没有就第一首
+  var pick = 'bgm';
+  try { pick = localStorage.getItem('ss_bgm') || 'bgm'; } catch (e) { /* 隐私模式忽略 */ }
+  if (!map[pick]) pick = els[0].id;
+
   var done = false;
-  /*
-     职责收敛：这里只负责「尽早把 src 挂上，让 2.76MB 音频开始下载」，**不负责播放**。
-     播放统一交给 main.js 的 startBGM（它在冒泡阶段跑，并且带失败重试）。
-     之前这里也调 play()，两处逻辑重复且失败处理不一致，真出问题时分不清是谁没出声。
-  */
   function go() {
     if (done) return; done = true;
     window.removeEventListener('pointerdown', go, true);
-    window.removeEventListener('keydown', go, true);
     window.removeEventListener('touchstart', go, true);
+    window.removeEventListener('keydown', go, true);
     window.removeEventListener('click', go, true);
-    el.src = el.dataset.src;
+    window.__BGM_LOAD(pick);
   }
   /* 捕获阶段 → 一定早于 main.js 的 startBGM（冒泡阶段），先一步开始下载 */
   window.addEventListener('pointerdown', go, true);
   window.addEventListener('touchstart', go, true);
   window.addEventListener('keydown', go, true);
   window.addEventListener('click', go, true);
-  window.__BGM_LAZY = { get loaded() { return !!el.getAttribute('src'); }, get playing() { return !el.paused; } };
+  window.__BGM_LAZY = {
+    get loaded() { var e = map[pick]; return !!(e && e.getAttribute('src')); },
+    get playing() { var e = map[pick]; return !!(e && !e.paused); },
+    get pick() { return pick; }
+  };
 })();
 </script>
 <script>

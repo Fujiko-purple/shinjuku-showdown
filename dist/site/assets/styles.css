@@ -547,8 +547,10 @@ body::after {
 .cine-skip b { color: var(--gold); font-family: var(--f-num); }
 
 /* --- 音量：收在右下角一枚按钮里 --- */
+/* 提到 #hud 之外之后要自己保证压在所有 .screen 之上（.screen 是 z-index:20），
+   否则标题/暂停/结算界面会把它盖住，玩家在这几个界面就调不了音量、也切不了 BGM。 */
 .audio-dock {
-  position: absolute; right: 16px; bottom: 18px; z-index: 6;
+  position: fixed; right: 16px; bottom: 18px; z-index: 9999;
   pointer-events: auto;
 }
 .audio-toggle {
@@ -580,9 +582,10 @@ body::after {
 .bgm-pick { display: flex; align-items: center; gap: 6px; padding-left: 2px; }
 .bgm-pick.hidden { display: none; }
 .bgm-pick-label { font-family: var(--f-ui); font-size: 12px; letter-spacing: .12em; color: rgba(255,255,255,.62); }
+/* white-space:nowrap：不加的话「雨爱」「最强之战」在窄面板里会被拆成两行，读起来很碎 */
 .bgm-btn {
-  font-family: var(--f-ui); font-size: 12px; letter-spacing: .08em;
-  padding: 3px 9px; border-radius: 7px; cursor: pointer;
+  font-family: var(--f-ui); font-size: 12px; letter-spacing: .08em; white-space: nowrap;
+  padding: 4px 10px; border-radius: 7px; cursor: pointer;
   color: rgba(255,255,255,.78); background: rgba(255,255,255,.07);
   border: 1px solid rgba(255,255,255,.16); transition: all .15s;
 }
@@ -866,7 +869,7 @@ html.is-touch #hud .stat-num { font-size: 12.5px; }
    这些是 mobile-ship 的写域，我只在自己的 styles.css 里做最小覆盖，不改他的文件。 */
 html.is-touch #hud .fighter-panel { width: 31vw; } /* 31vw 才够给中间读数留出净空 */
 /* 音量按钮：触屏档右下角是 mobile.css 的动作键簇，实测重叠 34x34 —— 挪到右侧中部 */
-html.is-touch #hud .audio-dock { bottom: auto; top: 46%; right: 8px; }
+html.is-touch .audio-dock { bottom: auto; top: 46%; right: 8px; }
 html.is-touch #hud #ability-bar .ab .ab-name { font-size: clamp(12px, 2.4vmin, 13px); }
 /* mobile.css 用百分比 inset(22%/26%) 定位字形区；术式名放大到 12px 后两者会叠 24px，
    这里按同一几何关系改用 30%/36%，把名字的空间让出来 */

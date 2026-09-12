@@ -119,23 +119,32 @@ writeFileSync(join(SITE_ASSETS, 'game.js'), scriptBody);
 writeFileSync(join(SITE_ASSETS, 'styles.css'), styles);
 if (mobileCss) writeFileSync(join(SITE_ASSETS, 'mobile.css'), mobileCss);
 
-/* 4a. 把 body.html 里的内联 base64 音频抽成独立文件 */
-const audioMatch = body.match(/src="data:audio\/([a-z0-9]+);base64,([A-Za-z0-9+/=]+)"/i);
-let audioInfo = null;
-let audioName = '';
-if (audioMatch) {
-  const buf = Buffer.from(audioMatch[2], 'base64');
-  audioName = 'bgm.' + (audioMatch[1] === 'mp4' ? 'm4a' : audioMatch[1]);
-  writeFileSync(join(SITE_ASSETS, audioName), buf);
-  audioInfo = { file: 'assets/' + audioName, bytes: buf.length };
+/* 4a. 把 body.html 里的内联 base64 音频抽成独立文件
+   @多首 BGM：每个 <audio id="x" ... src="data:audio/..."> 都会抽成 assets/x.m4a
+   （第一首沿用历史上的 bgm.m4a 名字，避免动到既有的懒加载器与缓存键）。
+   站点版只在玩家首次交互后才下载**当前选中**的那一首，切换时才按需拉另一首。 */
+const audioSrcRe = /<audio\s+id="([^"]+)"([^>]*?)src="data:audio\/([a-z0-9]+);base64,([A-Za-z0-9+/=]+)"/gi;
+const audioList = [];
+let am;
+while ((am = audioSrcRe.exec(body))) {
+  const id = am[1];
+  const ext = am[3] === 'mp4' ? 'm4a' : am[3];
+  const buf = Buffer.from(am[4], 'base64');
+  const name = audioList.length === 0 ? ('bgm.' + ext) : (id + '.' + ext);
+  writeFileSync(join(SITE_ASSETS, name), buf);
+  audioList.push({ id, file: 'assets/' + name, bytes: buf.length, raw: am[0], mid: am[2] });
 }
+const audioInfo = audioList.length
+  ? { file: audioList[0].file, bytes: audioList[0].bytes, all: audioList.map((a) => ({ id: a.id, file: a.file, bytes: a.bytes })) }
+  : null;
 
 /* 4b. 产物 HTML：音频外链化 + 清掉单文件标记 + 插入懒加载器与 PWA 头 */
 function siteBody() {
   let b = body;
-  if (audioMatch) {
-    b = b.replace(/src="data:audio\/[a-z0-9]+;base64,[A-Za-z0-9+/=]+"/i,
-      'preload="none" data-src="assets/' + audioName + '"');
+  for (const a of audioList) {
+    // 保留 id / loop 等属性，只把内联的 src 换成 data-src 交给懒加载器；
+    // 同时把原来的 preload="auto" 收掉（否则标签上会同时出现两个 preload，浏览器取第一个）。
+    b = b.replace(a.raw, '<audio id="' + a.id + '"' + a.mid.replace(/\s*preload="[^"]*"/i, '') + 'preload="none" data-src="' + a.file + '"');
   }
   b = b.replace('window.__SS_SINGLE_FILE = true;', 'window.__SS_SINGLE_FILE = false;');
   return b.trimEnd();

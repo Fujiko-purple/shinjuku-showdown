@@ -54623,7 +54623,15 @@ void main() {
    * ② 往这个数组里加一行 { id, name, el }。曲目切换 UI 会自动多出一个按钮。
    * 选择记在 localStorage（ss_bgm），下次进游戏还是上次那首。
    */
-  var BGM_TRACKS = [{ id: "rain", name: "雨爱", el: "bgm" }];
+  var BGM_TRACKS = [
+    { id: "rain", name: "雨爱", el: "bgm" },
+    /**
+     * 第二首来自 B 站《【循环歌单】"最强之战永久铭刻于新宿."》（早睡起大王，BV1MojB6iEdy）：
+     * 原片 52 分钟，取 1:00 起 225 秒（与原曲等长），首尾做 4 秒三角交叉淡入，
+     * 循环点无缝；响度对齐到原曲（-7.1 LUFS，与原曲 -6.5 同档），切换不会突然变响或变轻。
+     */
+    { id: "shinjuku", name: "最强之战", el: "bgm2" }
+  ];
   var bgmTrackId = null;
   var bgmEl = null;
   var bgmCacheId = "";
@@ -54676,6 +54684,10 @@ void main() {
     }
     bgmEl = null;
     bgmPlaying = false;
+    // 站点版：先让懒加载器把这一首的 src 挂上（单文件版没有这个函数，静默跳过）
+    if (typeof window.__BGM_LOAD === "function") {
+      try { window.__BGM_LOAD(t.el); } catch (e) { /* 懒加载失败不影响内联播放 */ }
+    }
     const mv = $("vol-music");
     if (mv) setBgmVolume(Number(mv.value) / 100);
     startBGM();
@@ -54863,6 +54875,18 @@ void main() {
     };
     const yieldFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
     cacheUI();
+  /**
+   * 音量 / BGM 面板（.audio-dock）必须是 <body> 的直接子节点，而且排在所有 .screen 之后。
+   * 它在 src/body.html 里已经是文档最后一段，但 body.html 只是片段、外层还有别的容器，
+   * 一旦落进某个建了层叠上下文的容器里，它的 z-index 就只在那个容器内有效 ——
+   * 结果就是标题 / 暂停 / 结算这几个 .screen 会把它整块盖住（实测标题界面 DOM 查得到、屏幕上却看不见）。
+   * 这里在启动时再兜一次底：移动（而不是复制）到 body 末尾，幂等、无副作用。
+   */
+  try {
+    const dock = document.querySelector(".audio-dock");
+    if (dock && dock.parentElement !== document.body) document.body.appendChild(dock);
+    else if (dock && document.body.lastElementChild !== dock) document.body.appendChild(dock);
+  } catch (e) { /* 面板位置兜底失败不影响游戏 */ }
     flashEl = $("flash");
     step("检测图形环境");
     await yieldFrame();

@@ -1,27 +1,54 @@
 <script>
-/* --- BGM 懒加载（站点版专用）：首屏绝不拉 2.7MB 音频，首次真实交互才请求 ---- */
+/* --- BGM 懒加载（站点版专用）-----------------------------------------------
+   首屏绝不拉音频（两首加起来 5.3MB）。只有玩家**第一次真实交互**时，
+   才开始下载「当前选中」的那一首；切歌时才按需拉另一首。
+
+   职责收敛：这里只负责「把 src 挂上，让音频开始下载」，**不负责播放**。
+   播放统一交给 main.js 的 startBGM（它在冒泡阶段跑，并且带失败重试）。
+   之前这里也调 play()，两处逻辑重复且失败处理不一致，真出问题时分不清是谁没出声。
+
+   window.__BGM_LOAD(id) 是给 main.js 切歌用的入口：
+   单文件版没有 data-src（音频本来就是内联的），这个函数不存在，main.js 会安全跳过。
+   ------------------------------------------------------------------------ */
 (function () {
-  var el = document.getElementById('bgm');
-  if (!el || !el.dataset || !el.dataset.src) return;
+  var els = document.querySelectorAll('audio[data-src]');
+  if (!els.length) return;
+  var map = {};
+  for (var i = 0; i < els.length; i++) map[els[i].id] = els[i];
+
+  window.__BGM_LOAD = function (id) {
+    var el = map[id];
+    if (!el) return false;
+    if (!el.getAttribute('src')) {
+      el.src = el.dataset.src;
+      try { el.load(); } catch (e) { /* 少数浏览器 load() 会抛，忽略 */ }
+    }
+    return true;
+  };
+
+  // 选中项：优先读上次的选择，没有就第一首
+  var pick = 'bgm';
+  try { pick = localStorage.getItem('ss_bgm') || 'bgm'; } catch (e) { /* 隐私模式忽略 */ }
+  if (!map[pick]) pick = els[0].id;
+
   var done = false;
-  /*
-     职责收敛：这里只负责「尽早把 src 挂上，让 2.76MB 音频开始下载」，**不负责播放**。
-     播放统一交给 main.js 的 startBGM（它在冒泡阶段跑，并且带失败重试）。
-     之前这里也调 play()，两处逻辑重复且失败处理不一致，真出问题时分不清是谁没出声。
-  */
   function go() {
     if (done) return; done = true;
     window.removeEventListener('pointerdown', go, true);
-    window.removeEventListener('keydown', go, true);
     window.removeEventListener('touchstart', go, true);
+    window.removeEventListener('keydown', go, true);
     window.removeEventListener('click', go, true);
-    el.src = el.dataset.src;
+    window.__BGM_LOAD(pick);
   }
   /* 捕获阶段 → 一定早于 main.js 的 startBGM（冒泡阶段），先一步开始下载 */
   window.addEventListener('pointerdown', go, true);
   window.addEventListener('touchstart', go, true);
   window.addEventListener('keydown', go, true);
   window.addEventListener('click', go, true);
-  window.__BGM_LAZY = { get loaded() { return !!el.getAttribute('src'); }, get playing() { return !el.paused; } };
+  window.__BGM_LAZY = {
+    get loaded() { var e = map[pick]; return !!(e && e.getAttribute('src')); },
+    get playing() { var e = map[pick]; return !!(e && !e.paused); },
+    get pick() { return pick; }
+  };
 })();
 </script>
