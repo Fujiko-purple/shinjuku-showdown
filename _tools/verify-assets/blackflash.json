@@ -1,7 +1,7 @@
 {
   "name": "blackflash",
-  "file": "tmp/verifier/dist.html",
-  "url": "file:///C%3A/Users/Administrator/Desktop/dsh/%E6%96%B0%E5%AE%BF%E5%AF%B9%E5%86%B3/tmp/verifier/dist.html",
+  "file": "dist/新宿决战.html",
+  "url": "file:///C%3A/Users/Administrator/Desktop/dsh/%E6%96%B0%E5%AE%BF%E5%AF%B9%E5%86%B3/dist/%E6%96%B0%E5%AE%BF%E5%86%B3%E6%88%98.html",
   "mobile": false,
   "viewport": [
     1280,
@@ -29,7 +29,7 @@
     {
       "name": "契约 §1.3 MECH_DEBUG.blackFlash 已注册",
       "pass": true,
-      "detail": "{\"F\":-1,\"P\":-999,\"delta\":0,\"ok\":false,\"ce\":100,\"chaos\":0,\"streak\":0,\"mul\":0,\"hits\":0,\"fails\":0,\"bf\":0,\"cd\":0,\"win\":1,\"mulNext\":2.5,\"presses\":0,\"legit\":0,\"mashes\":0,\"masteryT\":0,\"chaosActive\":false,\"touch\":false,\"why\":\"\",\"ringsSpawned\":0,\"ringErrMax\":0}"
+      "detail": "{\"F\":-1,\"P\":-999,\"delta\":0,\"tF\":-1,\"tP\":-1,\"dtMs\":-1,\"winMs\":16.7,\"ok\":false,\"ce\":100,\"ceAtJudge\":-1,\"chaos\":0,\"streak\":0,\"mul\":0,\"hits\":0,\"fails\":0,\"bf\":0,\"cd\":0,\"win\":1,\"mulNext\":2.5,\"presses\":0,\"legit\":0,\"mashes\":0,\"masteryT\":0,\"chaosActive\":false,\"touch\":false,\"why\":\"\",\"ringsSpawned\":0,\"ringsSnapped\":0,\"dotsSpawned\":0,\"ringErrMax\":0}"
     },
     {
       "name": "blackFlash 自报字段齐全（契约 §1.3）",
@@ -39,27 +39,37 @@
     {
       "name": "校准：轻击能命中（拿到命中帧间距）",
       "pass": true,
-      "detail": "Δ帧=10 amount=3"
+      "detail": "Δ帧=14 amount=3"
     },
     {
       "name": "扫帧：至少一次同步成功（|delta| <= 1）",
       "pass": true,
-      "detail": "成功集合=[0,1]"
+      "detail": "成功集合=[1,4]"
     },
     {
-      "name": "扫帧：|delta| >= 3 必须失败",
+      "name": "§6 判定与时间窗自洽（ok === dtMs <= winMs）",
       "pass": true,
-      "detail": "|delta|>=3 的判定=[{\"delta\":4,\"ok\":false,\"streak\":0},{\"delta\":3,\"ok\":false,\"streak\":0},{\"delta\":3,\"ok\":false,\"streak\":0},{\"delta\":3,\"ok\":false,\"streak\":0}]"
+      "detail": "[{\"d\":75.7,\"w\":16.7,\"ok\":false},{\"d\":50.5,\"w\":16.7,\"ok\":false},{\"d\":63.7,\"w\":16.7,\"ok\":false},{\"d\":53,\"w\":16.7,\"ok\":false},{\"d\":39.7,\"w\":16.7,\"ok\":false},{\"d\":48.9,\"w\":16.7,\"ok\":false},{\"d\":19.6,\"w\":16.7,\"ok\":false},{\"d\":14.9,\"w\":16.7,\"ok\":true},{\"d\":29.7,\"w\":33,\"ok\":true}]"
+    },
+    {
+      "name": "§6 超出窗口的样本必须失败",
+      "pass": true,
+      "detail": "超出窗口样本=7/9 例: [{\"dtMs\":75.7,\"winMs\":16.7,\"ok\":false},{\"dtMs\":50.5,\"winMs\":16.7,\"ok\":false},{\"dtMs\":63.7,\"winMs\":16.7,\"ok\":false},{\"dtMs\":53,\"winMs\":16.7,\"ok\":false},{\"dtMs\":39.7,\"winMs\":16.7,\"ok\":false},{\"dtMs\":48.9,\"winMs\":16.7,\"ok\":false}]"
+    },
+    {
+      "name": "§6 窗口内样本必须成功",
+      "pass": true,
+      "detail": "窗口内样本=2/9 例: [{\"dtMs\":14.9,\"ok\":true},{\"dtMs\":29.7,\"ok\":true}]"
     },
     {
       "name": "扫帧：判定与 |delta| 自洽（ok 只出现在 |delta| <= 2）",
-      "pass": true,
-      "detail": "成功的 delta 集合=[0,1]"
+      "pass": false,
+      "detail": "成功的 delta 集合=[1,4]"
     },
     {
-      "name": "§6 黑闪伤害 >= 同招普通命中 2.4 倍",
-      "pass": false,
-      "detail": "黑闪 amount=7 普通 amount=3 比值=2.33"
+      "name": "§6 黑闪伤害 >= 同招普通命中 2.4 倍（hp 真值 / 普通中位）",
+      "pass": true,
+      "detail": "真值比=2.500 (6.50/2.60)；普通样本=[2.6,2.6,2.6,2.6,2.6,2.6,2.99]"
     },
     {
       "name": "§6 成功时事件流带 blackFlash 标记",
@@ -74,7 +84,7 @@
     {
       "name": "§6 随机按 V 500 次 → 黑闪 0 次",
       "pass": true,
-      "detail": "stats delta=0 采样帧=964"
+      "detail": "stats delta=0 采样帧=1264"
     },
     {
       "name": "§6 每帧按 V（连点）+ 连续攻击 → 黑闪 0 次",
@@ -94,5 +104,5 @@
   ],
   "notes": [],
   "pageErrors": [],
-  "seconds": 48.9
+  "seconds": 45.6
 }

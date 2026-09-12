@@ -139,15 +139,17 @@ try {
     for (let i = 0; i < 24; i++) { msamp.push(await rig.ev('window.__BODY("mahoraga", 8)')); await sleep(400); }
     const valid = msamp.filter(m => m && m.meshes > 0);
     const ys = valid.map(m => m.anchorY).sort((a, b) => a - b);
-    const hover = valid.filter(m => m.anchorY >= 12);
+    const maxY = valid.length ? Math.max(...valid.map(m => m.anchorY)) : 0;
+    const hover = valid.filter(m => m.anchorY >= Math.max(3, 0.7 * maxY));   // 相对最高点取悬浮帧（AIR_Y 现为 4.0/4.5/5.0）
     const hoverY = hover.length ? hover.map(m => m.anchorY).sort((a, b) => a - b)[Math.floor(hover.length / 2)] : null;
     const hoverH = hover.length ? hover.map(m => m.bodyH).sort((a, b) => a - b)[Math.floor(hover.length / 2)] : null;
     console.log('魔虚罗姿态采样 ' + valid.length + '/' + msamp.length + ' 帧有效: 锚点 y min=' + (ys[0] ?? '-') + ' 中位=' + (ys.length ? ys[Math.floor(ys.length / 2)] : '-') + ' max=' + (ys[ys.length - 1] ?? '-')
       + ' | 悬浮帧 ' + hover.length + ' 个: 中位 y=' + hoverY + ' 中位 bodyH=' + hoverH + ' | 最小 y=' + (ys[0] ?? '-'));
     console.log('  采样明细 [anchorY, bodyH, allH, allMinY, meshes]: ' + JSON.stringify(valid.map(m => [m.anchorY, m.bodyH, m.allH, m.allMinY, m.meshes])));
     rig.check('§4 场景里存在名为 mahoraga 的模型节点（10s 内至少 1 帧量到）', valid.length > 0, '有效帧=' + valid.length + '/' + msamp.length);
-    rig.check('§4 悬浮锚点 y ≈ 14~17（悬浮帧中位 ' + hoverY + '，容差 12~19）', hoverY !== null && hoverY >= 12 && hoverY <= 19, 'hover 帧=' + hover.length + ' y 中位=' + hoverY + ' 全部 y∈[' + (ys[0] ?? '-') + ',' + (ys[ys.length - 1] ?? '-') + ']');
-    rig.check('§4 悬浮躯体高 3.8~4.2m 量级（悬浮帧中位 bodyH=' + hoverH + '，容差 3.0~6.0）', hoverH !== null && hoverH >= 3.0 && hoverH <= 6.0, 'bodyH=' + hoverH);
+    rig.check('§4 模型确实在半空（悬浮帧中位 y >= 3m）', hoverY !== null && hoverY >= 3, 'hover 帧=' + hover.length + ' y 中位=' + hoverY + ' 全部 y∈[' + (ys[0] ?? '-') + ',' + (ys[ys.length - 1] ?? '-') + ']');
+    if (hoverY !== null && (hoverY < 12 || hoverY > 19)) rig.note('契约口径差异：契约 §4 写「基准高度 y ≈ 14~17」，实测悬浮中位 y=' + hoverY + '（Lead 已说明 AIR_Y 改成 4.0/4.5/5.0 取景）——需要 Lead 同步契约文本，不是缺陷');
+    rig.check('§4 悬浮躯体高 3.8~4.2m 量级（悬浮帧中位 bodyH=' + hoverH + '，容差 3.0~6.0）', hoverH !== null && hoverH >= 3.0 && hoverH <= 6.0, 'bodyH=' + hoverH + '（悬浮帧={y>=' + Math.max(3, 0.7 * maxY).toFixed(2) + '}，共 ' + hover.length + ' 帧）');
     rig.check('§4 会俯冲/落地（10s 内锚点掉到 < 12）', ys.length > 0 && ys[0] < 12, '最低锚点 y=' + (ys[0] ?? '-'));
     const visN = valid.filter(m => m.visible === true).length;
     rig.check('§4 模型可见（>= 80% 采样帧）', valid.length > 0 && visN >= Math.ceil(valid.length * 0.8), '可见 ' + visN + '/' + valid.length + ' 帧');
@@ -192,7 +194,7 @@ try {
     for (const sk of ['blue', 'red', 'purple']) {
       const attempts = [];
       let landed = 0;
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 10; i++) {
         const a = await rig.ev('window.__MA().hp');
         const ad0 = await rig.ev('JSON.stringify(window.__MA().adapt)');
         await rig.ev('window.__SS.combat.forceSkill(' + JSON.stringify(sk) + ',"gojo")');
@@ -205,9 +207,9 @@ try {
         if ((b || 0) <= 0) break;
       }
       hits[sk] = { landed, total: attempts.length, maxDmg: Math.max(...attempts.map(x => x.dmg)), adaptMoved: attempts.filter(x => x.adaptChanged).length };
-      console.log('  锁定 ' + sk + ': 6 次内造成伤害 ' + landed + '/' + attempts.length + ' 次，最大伤害 ' + hits[sk].maxDmg + '，adapt 变化 ' + hits[sk].adaptMoved + ' 次 ' + JSON.stringify(attempts));
+      console.log('  锁定 ' + sk + ': 10 次内造成伤害 ' + landed + '/' + attempts.length + ' 次，最大伤害 ' + hits[sk].maxDmg + '，adapt 变化 ' + hits[sk].adaptMoved + ' 次');
     }
-    rig.check('§4 锁定后 赫/茈 至少各命中一次（6 次机会内）', hits.red.maxDmg > 0.2 && hits.purple.maxDmg > 0.2, JSON.stringify(hits));
+    rig.check('§4 锁定后 赫/茈 至少各命中一次（10 次机会内）', hits.red.maxDmg > 0.2 && hits.purple.maxDmg > 0.2, JSON.stringify(hits));
     rig.check('§4 锁定后 苍 也有命中迹象（苍 dmg=0，用 adapt 计数判定）', hits.blue.adaptMoved > 0, JSON.stringify(hits.blue));
   }
 
@@ -253,33 +255,49 @@ try {
     await sleep(1200);
     await rig.ev('window.__PUT(-1.6, 0)');
     await sleep(400);
-    const g0 = await rig.ev('window.__SS.snap.sukuna.hp');
-    await rig.keys('KeyJ', 40); await sleep(700);
-    const g1 = await rig.ev('window.__SS.snap.sukuna.hp');
-    const base = +(g0 - g1).toFixed(3);
+    const punchDamage = async (n) => {
+      const out = [];
+      for (let i = 0; i < n; i++) {
+        const a = await rig.ev('window.__SS.snap.sukuna.hp');
+        await rig.keys('KeyJ', 40);
+        await sleep(430);
+        const b = await rig.ev('window.__SS.snap.sukuna.hp');
+        out.push(+(a - b).toFixed(3));
+      }
+      return out;
+    };
+    const baseArr = await punchDamage(10);
+    const base = +baseArr.reduce((s, v) => s + v, 0).toFixed(3);
+    console.log('无魔虚罗：每次轻击伤害 ' + JSON.stringify(baseArr) + ' 合计=' + base);
     await summon();
     await rig.ev('window.__PUT(-1.6, 0)');
     await sleep(500);
-    const g2 = await rig.ev('window.__SS.snap.sukuna.hp');
-    await rig.keys('KeyJ', 40); await sleep(700);
-    const g3 = await rig.ev('window.__SS.snap.sukuna.hp');
-    const gated = +(g2 - g3).toFixed(3);
-    console.log('damageGate 玩家打宿傩: 无魔虚罗=' + base + ' 有魔虚罗=' + gated + ' 比值=' + (base ? (gated / base).toFixed(3) : '-'));
-    rig.check('§4 魔虚罗存活时玩家打宿傩 x0.6', base > 0 && Math.abs(gated / base - 0.6) <= 0.15, base + ' -> ' + gated + ' 比值=' + (base ? (gated / base).toFixed(3) : '-'));
+    const gateArr = await punchDamage(12);
+    const gated = +gateArr.reduce((s, v) => s + v, 0).toFixed(3);
+    const unblocked = gateArr.filter(v => v > 0.05);
+    const blocked = gateArr.length - unblocked.length;
+    console.log('有魔虚罗：每次轻击伤害 ' + JSON.stringify(gateArr) + ' 合计=' + gated + ' 未挡下=' + unblocked.length + ' 挡下=' + blocked);
+    console.log('damageGate 玩家打宿傩: 无魔虚罗合计=' + base + '(单发中位 ' + (baseArr.slice().sort((a, b) => a - b)[Math.floor(baseArr.length / 2)]) + ') 有魔虚罗合计=' + gated + ' 合计比=' + (base ? (gated / base).toFixed(3) : '-') + ' 未挡下单发中位=' + (unblocked.length ? unblocked.slice().sort((a, b) => a - b)[Math.floor(unblocked.length / 2)] : '-'));
+    // 用「未挡下那一发的伤害」判 gate 本身（挡下是 §4 的另一个机制：30% 概率挡下并把伤害转记到魔虚罗）
+    const baseMed = baseArr.slice().sort((a, b) => a - b)[Math.floor(baseArr.length / 2)];
+    const gateMed = unblocked.length ? unblocked.slice().sort((a, b) => a - b)[Math.floor(unblocked.length / 2)] : null;
+    rig.check('§4 魔虚罗存活时玩家打宿傩 x0.6（用未挡下单发中位对比）', !!gateMed && baseMed > 0 && Math.abs(gateMed / baseMed - 0.6) <= 0.15, '无魔虚罗单发中位=' + baseMed + ' 未挡下单发中位=' + gateMed + ' 比值=' + (gateMed ? (gateMed / baseMed).toFixed(3) : '-') + '（挡下 ' + blocked + '/' + gateArr.length + '）；合计比=' + (base ? (gated / base).toFixed(3) : '-'));
+    // 只统计事件流里 side=sukuna && target=gojo 的命中，避免魔虚罗的技能伤害混进来
     const dmgtake = async () => {
       await rig.ev('window.__PUT(-6, 0)');
-      const a = await rig.ev('window.__SS.snap.gojo.hp');
+      await rig.reset(true);
       await rig.ev('window.__SS.combat.forceSkill("dismantle","sukuna")');
       await sleep(2600);
-      const b = await rig.ev('window.__SS.snap.gojo.hp');
-      return +(a - b).toFixed(3);
+      const r = await rig.take();
+      const hits = r.events.filter(e => e.type === 'hit' && e.side === 'sukuna' && e.target === 'gojo');
+      return { sum: +hits.reduce((s, e) => s + (e.amount || 0), 0).toFixed(3), n: hits.length, all: r.events.filter(e => e.type === 'hit').length };
     };
     const t2 = await dmgtake();
     await rig.ev('window.__SS.combat.reset()');
     await sleep(1200);
     const t1 = await dmgtake();
-    console.log('damageGate 宿傩打玩家(解): 无魔虚罗=' + t1 + ' 有魔虚罗=' + t2 + ' 比值=' + (t1 ? (t2 / t1).toFixed(3) : '-'));
-    rig.check('§4 宿傩打玩家 x1.25', t1 > 0 && Math.abs(t2 / t1 - 1.25) <= 0.2, t1 + ' -> ' + t2 + ' 比值=' + (t1 ? (t2 / t1).toFixed(3) : '-'));
+    console.log('damageGate 宿傩打玩家(解, 事件流): 无魔虚罗=' + JSON.stringify(t1) + ' 有魔虚罗=' + JSON.stringify(t2) + ' 比值=' + (t1.sum ? (t2.sum / t1.sum).toFixed(3) : '-'));
+    rig.check('§4 宿傩打玩家 x1.25（事件流只取宿傩的命中）', t1.sum > 0 && t2.sum > 0 && Math.abs(t2.sum / t1.sum - 1.25) <= 0.2, JSON.stringify(t1) + ' -> ' + JSON.stringify(t2) + ' 比值=' + (t1.sum ? (t2.sum / t1.sum).toFixed(3) : '-'));
   }
 
   if (has('perf')) {

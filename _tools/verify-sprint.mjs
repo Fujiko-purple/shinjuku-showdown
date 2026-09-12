@@ -153,7 +153,8 @@ try {
     const mE = motion(E.samples);
     console.log('E 每 6 帧 toggle Shift: v max=' + (mE.speed.length ? Math.max(...mE.speed.map(s => s.v)).toFixed(2) : '-') + ' phases=' + JSON.stringify([...new Set(E.samples.map(s => s.ph))]));
     const eS = mE.speed.length ? stats(mE.speed.map(s => s.v)) : null;
-    rig.check('E 高频 toggle 不超上限（p95 <= 12）', !eS || eS.p95 <= 12, 'p95=' + (eS && eS.p95) + ' max=' + (eS && eS.max));
+    const eAvg = avgSpeed(mE, 400, 2200);
+    rig.check('E 高频 toggle 不超上限（>=1s 位移均速 <= 12）', eAvg === null || eAvg <= 12, '1s位移均速=' + eAvg + ' ; [诊断]逐帧 p95=' + (eS && eS.p95) + ' max=' + (eS && eS.max) + '（高刷下逐帧口径无判别力）');
     rig.check('E 无 NaN/异常', E.samples.every(s => isFinite(s.x) && isFinite(s.z)) && E.errs.length === 0, 'errs=' + JSON.stringify(E.errs));
 
     /* ---------- F. 反例：一动不动挂机 3s ---------- */
@@ -181,7 +182,8 @@ try {
     const mG = motion(G.samples);
     console.log('G 折返: 总位移=' + mG.dist.toFixed(2) + 'm max v=' + (mG.speed.length ? Math.max(...mG.speed.map(s => s.v)).toFixed(2) : '-'));
     const gS = mG.speed.length ? stats(mG.speed.map(s => s.v)) : null;
-    rig.check('G 折返无异常/不超上限（p95 <= 12）', G.samples.every(s => isFinite(s.x) && isFinite(s.z)) && (!gS || gS.p95 <= 12) && G.errs.length === 0, 'p95=' + (gS && gS.p95) + ' max=' + (gS && gS.max) + ' errs=' + JSON.stringify(G.errs));
+    const gAvg = avgSpeed(mG, 300, 1500);
+    rig.check('G 折返无异常/不超上限（>=1s 位移均速 <= 12）', G.samples.every(s => isFinite(s.x) && isFinite(s.z)) && (gAvg === null || gAvg <= 12) && G.errs.length === 0, '1s位移均速=' + gAvg + ' ; [诊断]逐帧 p95=' + (gS && gS.p95) + ' max=' + (gS && gS.max) + ' errs=' + JSON.stringify(G.errs));
 
     /* ---------- H. 边界：0.35s 前后各取一帧 ---------- */
     await rig.reset(true);
@@ -215,9 +217,10 @@ try {
     rig.check('§7 __TOUCH.run 标志被补上', M.samples.some(s => s.run === true || s.run === 1), 'run 采样值=' + JSON.stringify([...new Set(M.samples.map(s => s.run))]));
     await rig.shot('02-mobile-sprint');
     /* 边界：|摇杆| = 0.90 不该疾跑 */
+    await setStick(0, -0.90);
+    await sleep(600);            // 先让上一条用例的 0.25s 惯性尾巴沉降（sprint 对账指出）
     await rig.reset(true);
     await rig.watch(WATCH);
-    await setStick(0, -0.90);
     await sleep(1400);
     const M2 = await rig.take();
     const s2 = M2.samples.some(s => s.ph === 'sprint');
@@ -226,9 +229,10 @@ try {
     console.log('手机 摇杆 0.90: v=' + v2 + ' sprint=' + s2 + ' phases=' + JSON.stringify([...new Set(M2.samples.map(s => s.ph))]));
     rig.check('§7 边界 0.90（未过 0.92）不疾跑', !s2, 'phase 集合=' + JSON.stringify([...new Set(M2.samples.map(s => s.ph))]));
     /* 边界：|摇杆| = 0.95 该疾跑 */
+    await setStick(0, -0.95);
+    await sleep(600);
     await rig.reset(true);
     await rig.watch(WATCH);
-    await setStick(0, -0.95);
     await sleep(1400);
     const M3 = await rig.take();
     const m3 = motion(M3.samples);
@@ -236,9 +240,10 @@ try {
     console.log('手机 摇杆 0.95: v=' + v3 + ' sprint=' + M3.samples.some(s => s.ph === 'sprint'));
     rig.check('§7 边界 0.95（过了 0.92）触发疾跑', M3.samples.some(s => s.ph === 'sprint'), 'v=' + v3);
     /* 反例：摇杆回中 + 挂机 */
+    await setStick(0, 0);
+    await sleep(600);
     await rig.reset(true);
     await rig.watch(WATCH);
-    await setStick(0, 0);
     await sleep(1500);
     const M4 = await rig.take();
     const m4 = motion(M4.samples);

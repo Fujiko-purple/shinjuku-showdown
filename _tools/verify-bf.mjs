@@ -82,10 +82,12 @@ try {
   /* ---------- 2. 扫帧：V 按在命中帧前后 ---------- */
   const trials = [];
   if (dtick !== null) {
-    for (const k of [-3, -2, -1, 0, 1, 2, 3]) {
+    // 判定改成「帧率无关时间窗」后（Lead 21:4x 改动），±1 帧的粗扫已经打不到窗口，
+    // 改成从 -6 到 +10 的细扫，拿到 2 次成功就停（每次 trial ~2s）
+    for (const k of [-6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
       const offV = 3 + dtick - 1 + k;
       const tr = await trial(3, offV);
-      trials.push({ k, offV, delta: tr.bf && tr.bf.delta, ok: tr.bf && tr.bf.ok, streak: tr.bf && tr.bf.streak,
+      trials.push({ k, offV, dtMs: tr.bf && tr.bf.dtMs, winMs: tr.bf && tr.bf.winMs, delta: tr.bf && tr.bf.delta, ok: tr.bf && tr.bf.ok, streak: tr.bf && tr.bf.streak,
         F: tr.bf && tr.bf.F, P: tr.bf && tr.bf.P, hitTick: tr.hitTick, hitFrame: tr.hitFrame,
         amount: tr.amount, isBFEvent: tr.isBFEvent, mul: tr.bf && tr.bf.mul, ce: tr.bf && tr.bf.ce,
         hp: [tr.hpBefore, tr.hpAfter], errs: tr.errs });
@@ -93,6 +95,7 @@ try {
         ' delta=' + (tr.bf && tr.bf.delta) + ' ok=' + (tr.bf && tr.bf.ok) + ' streak=' + (tr.bf && tr.bf.streak) +
         ' mul=' + (tr.bf && tr.bf.mul) + ' ce=' + (tr.bf && tr.bf.ce) + ' | 命中 tick=' + tr.hitTick + ' f=' + tr.hitFrame + ' amount=' + tr.amount + ' bf事件=' + tr.isBFEvent);
       await sleep(tr.bf && tr.bf.ok ? 3400 : 1400);
+      if (trials.filter(t => t.ok).length >= 2) break;
     }
   }
   const judged = trials.filter(t => t.delta !== null && t.delta !== undefined);
@@ -100,20 +103,31 @@ try {
   const okOnes = judged.filter(t => t.ok);
   const failOnes = judged.filter(t => !t.ok);
   rig.check('扫帧：至少一次同步成功（|delta| <= 1）', okOnes.some(t => Math.abs(t.delta) <= 1), '成功集合=' + JSON.stringify(okOnes.map(t => t.delta)));
-  rig.check('扫帧：|delta| >= 3 必须失败', failOnes.filter(t => Math.abs(t.delta) >= 3).length === judged.filter(t => Math.abs(t.delta) >= 3).length,
-    '|delta|>=3 的判定=' + JSON.stringify(judged.filter(t => Math.abs(t.delta) >= 3).map(t => ({ delta: t.delta, ok: t.ok, streak: t.streak }))));
-  rig.check('扫帧：判定与 |delta| 自洽（ok 只出现在 |delta| <= 2）', okOnes.every(t => Math.abs(t.delta) <= 2), '成功的 delta 集合=' + JSON.stringify(okOnes.map(t => t.delta)));
+  // Lead 已把判定从「±1 帧」改成「帧率无关的时间窗」（ok = |tF-tP| <= winMs，触屏 33ms，连闪/掌握期再加）——
+  // 所以「±3 帧必失败」这条帧口径断言不再适用：139fps 下 3 帧只有 21.6ms，仍在放宽后的 33ms 窗口内。
+  // 改成直接验契约的时间窗谓词（mech.blackFlash 现在自报 tF/tP/dtMs/winMs）。
+  const withT = judged.filter(t => typeof t.dtMs === 'number' && typeof t.winMs === 'number');
+  console.log('时间窗样本: ' + JSON.stringify(withT.map(t => ({ delta帧: t.delta, dtMs: +t.dtMs.toFixed(1), winMs: t.winMs, ok: t.ok, streak: t.streak }))));
+  rig.check('§6 判定与时间窗自洽（ok === dtMs <= winMs）', withT.length >= 3 && withT.every(t => t.ok === (t.dtMs <= t.winMs + 0.6)), JSON.stringify(withT.map(t => ({ d: +t.dtMs.toFixed(1), w: t.winMs, ok: t.ok }))));
+  const over = withT.filter(t => t.dtMs > t.winMs + 0.6);
+  rig.check('§6 超出窗口的样本必须失败', over.length > 0 && over.every(t => !t.ok), '超出窗口样本=' + over.length + '/' + withT.length + ' 例: ' + JSON.stringify(over.slice(0, 6).map(t => ({ dtMs: +t.dtMs.toFixed(1), winMs: t.winMs, ok: t.ok }))));
+  const inside = withT.filter(t => t.dtMs <= t.winMs);
+  rig.check('§6 窗口内样本必须成功', inside.length > 0 && inside.every(t => t.ok), '窗口内样本=' + inside.length + '/' + withT.length + ' 例: ' + JSON.stringify(inside.map(t => ({ dtMs: +t.dtMs.toFixed(1), ok: t.ok }))));
+  // （原来的「ok 只出现在 |delta| <= 2」是帧口径断言，Lead 改时间窗后已过时，删除；由上面三条时间窗断言取代）
   const succ = okOnes.find(t => t.hp && t.hp[0] !== null && t.hp[1] !== null);
-  const norm = judged.find(t => !t.ok && t.hp && t.hp[0] !== null && t.hp[1] !== null);
-  if (succ && norm) {
-    // 事件里的 amount 是 Math.round 后的整数（普通 26×0.1=2.6 显示 3），倍率必须用 hp 真实差值算
+  const normAll = judged.filter(t => !t.ok && t.hp && t.hp[0] !== null && t.hp[1] !== null).map(t => t.hp[0] - t.hp[1]).sort((a, b) => a - b);
+  const normDmg = normAll.length ? normAll[Math.floor(normAll.length / 2)] : null;
+  console.log('普通命中样本 hp 差值: ' + JSON.stringify(normAll.map(x => +x.toFixed(3))) + ' 中位=' + (normDmg === null ? '-' : normDmg.toFixed(3)));
+  const norm = normAll.length ? { hp: [null, null] } : null;
+  if (succ && normDmg !== null) {
+    // 事件里的 amount 是 Math.round 后的整数（普通 26×0.1=2.6 显示 3），倍率必须用 hp 真实差值算；
+    // 分母取「多次普通命中的中位数」——个别 trial 会吃到额外加成（实测出现过 2.99 vs 常规 2.60）
     const dSucc = succ.hp[0] - succ.hp[1];
-    const dNorm = norm.hp[0] - norm.hp[1];
-    console.log('伤害（hp 真值）: 黑闪 ' + succ.hp[0] + '->' + succ.hp[1] + ' = ' + dSucc.toFixed(3) + ' | 普通 ' + norm.hp[0] + '->' + norm.hp[1] + ' = ' + dNorm.toFixed(3));
-    console.log('伤害（事件取整）: 黑闪 amount=' + succ.amount + ' 普通 amount=' + norm.amount + ' 取整比值=' + (succ.amount / norm.amount).toFixed(2));
-    rig.check('§6 黑闪伤害 >= 同招普通命中 2.4 倍（用 hp 真值）', dNorm > 0 && dSucc >= 2.4 * dNorm, '真值比=' + (dSucc / dNorm).toFixed(3) + ' (' + dSucc.toFixed(2) + '/' + dNorm.toFixed(2) + ')；取整后 ' + succ.amount + '/' + norm.amount + '=' + (succ.amount / norm.amount).toFixed(2));
+    console.log('伤害（hp 真值）: 黑闪 ' + succ.hp[0] + '->' + succ.hp[1] + ' = ' + dSucc.toFixed(3) + ' | 普通中位 ' + normDmg.toFixed(3) + '（样本 ' + normAll.length + '）');
+    console.log('伤害（事件取整）: 黑闪 amount=' + succ.amount + ' 普通 amount≈' + (norm.amount === undefined ? '-' : norm.amount) + ' 取整比值=' + (norm.amount ? (succ.amount / norm.amount).toFixed(2) : '-'));
+    rig.check('§6 黑闪伤害 >= 同招普通命中 2.4 倍（hp 真值 / 普通中位）', normDmg > 0 && dSucc >= 2.4 * normDmg, '真值比=' + (dSucc / normDmg).toFixed(3) + ' (' + dSucc.toFixed(2) + '/' + normDmg.toFixed(2) + ')；普通样本=' + JSON.stringify(normAll.map(x => +x.toFixed(2))));
   } else {
-    rig.check('§6 黑闪伤害 >= 同招普通命中 2.4 倍（用 hp 真值）', false, '缺成功样本或普通样本 succ=' + JSON.stringify(succ && succ.hp) + ' norm=' + JSON.stringify(norm && norm.hp));
+    rig.check('§6 黑闪伤害 >= 同招普通命中 2.4 倍（hp 真值 / 普通中位）', false, '缺成功样本或普通样本 succ=' + JSON.stringify(succ && succ.hp) + ' norm=' + JSON.stringify(normAll));
   }
   if (succ) {
     rig.check('§6 成功时事件流带 blackFlash 标记', succ.isBFEvent === true, 'hit 事件 blackFlash=' + succ.isBFEvent);

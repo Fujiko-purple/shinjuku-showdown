@@ -78,11 +78,19 @@
     "ArrowUp",
     "ArrowDown"
   ]);
+  /**
+   * 按键按下的**真实时刻**（performance.now()）。
+   * 输入是每帧只采样一次，所以「命中前 8ms 按下」在 30/60fps 下会被归到命中帧之后，
+   * 黑闪这种亚帧级判定就会不公平。记下真实时刻后，combat.js 可以把按下折算成
+   * 「当前帧起点往回 age 毫秒」的游戏时间，三种帧率下的判定就一致了。
+   */
+  var keyDownAt = {};
   window.addEventListener("keydown", (e) => {
     if (TRACKED.has(e.code)) e.preventDefault();
     if (e.repeat) return;
     keys[e.code] = true;
     freshKeys.add(e.code);
+    keyDownAt[e.code] = performance.now();
     onKeyDown(e.code);
   });
   window.addEventListener("keyup", (e) => {
@@ -872,6 +880,8 @@
     }
   }
   var inputSnapshot = {
+    v: false,
+    vAgeMs: 0,
     moveX: 0,
     moveZ: 0,
     camX: 0,
@@ -930,6 +940,13 @@
     inputSnapshot.charge = !!k.KeyL;
     /** V = 黑闪「咒力同步」键（见 src/blackflash.js）：只在按下的那一帧为 true */
     inputSnapshot.v = freshKeys.has("KeyV");
+    /**
+     * V 这一帧被采样到时，距离玩家真正按下已经过了多少毫秒（0~一帧）。
+     * 黑闪用它把按下时刻折算到帧内的正确位置 —— 没有它，30/60fps 与 144fps 的判定就不一致。
+     */
+    inputSnapshot.vAgeMs = inputSnapshot.v && keyDownAt.KeyV
+      ? Math.max(0, Math.min(100, performance.now() - keyDownAt.KeyV))
+      : 0;
     inputSnapshot.mouse.x = mouse.x;
     inputSnapshot.mouse.y = mouse.y;
     inputSnapshot.mouse.pressed = mouse.left;

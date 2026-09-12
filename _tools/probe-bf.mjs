@@ -87,18 +87,19 @@ const PAGE = String.raw`window.__BF = (function () {
     var f0 = a.frame;
     // lead = 起手到命中的帧数（由基准试验实测）；delta = 目标 |F - P|
     // update() 内部先 cb.frame++ 再读输入，所以一次按下被记录的帧号 = cur + 1
+    var d = spec.dt || (1 / 60);
     var pressAt = (spec.lead === null || spec.lead === undefined) ? -1
       : (f0 + spec.lead - 1 - (spec.delta || 0));
     var hit = -1;
-    var maxIter = spec.maxIter || 60;
+    var maxIter = spec.maxIter || (spec.dt ? 240 : 60);
     for (var i = 0; i < maxIter; i++) {
       var cur = a.frame;
-      a.update(mkInput({ light: i === 0, v: cur === pressAt }), 1 / 60, 0);
+      a.update(mkInput({ light: i === 0, v: cur === pressAt }), d, 0);
       if (mech().hits > m0.hits) { hit = cur + 1; if (!spec.afterHit) break; }
       if (hit > 0 && spec.afterHit && (cur + 1 - hit) >= spec.afterHit) break;
     }
     var m1 = mech();
-    var judge = { F: m1.F, P: m1.P, delta: m1.delta, ok: m1.ok, why: m1.why, win: m1.win, mul: m1.mul };
+    var judge = { F: m1.F, P: m1.P, delta: m1.delta, ok: m1.ok, why: m1.why, win: m1.win, mul: m1.mul, dtMs: m1.dtMs, winMs: m1.winMs, tRef: m1.tRef, tP: m1.tP };
     return {
       f0: f0, hit: hit, hitRel: hit < 0 ? -1 : hit - f0, pressAt: pressAt,
       dmg: Math.round((hp0 - hp()) * 1000) / 1000,
@@ -371,6 +372,51 @@ const PAGE = String.raw`window.__BF = (function () {
   R.btnInfo = btnInfo;
   R.calibrateLead = calibrateLead;
   R.touchSync = touchSync;
+  /**
+   * P0 帧率公平性试验：把「真实按下时刻」放在相对命中时刻 offMs 处，
+   * 按游戏真实的输入采样规则（每帧起始读一次输入）换算成按下帧，再看判定结果。
+   * 同一条时间线跑两遍：第一遍不按 V 测出命中帧/命中时刻，第二遍在算出的那一帧按下。
+   */
+  function timingTrial(spec) {
+    var a = A(), d = spec.dt;
+    function run(pressRel, ageMs) {
+      a.reset(); a.setAiEnabled(false); place();
+      a.pressFrame.v = -999;
+      if (a.pressTime) a.pressTime.v = -999;
+      var h0 = mech().hits, hitRel = -1, tHit = -1, dmg0 = hp();
+      for (var i = 0; i < 240; i++) {
+        var rel = i + 1;
+        var press = (pressRel !== null && pressRel !== undefined && rel === pressRel);
+        a.update(mkInput({ light: i === 0, v: press, vAgeMs: press ? (ageMs || 0) : 0 }), d, 0);
+        if (mech().hits > h0) { hitRel = rel; tHit = mech().tF; break; }
+      }
+      return { hitRel: hitRel, tHit: tHit, dmg: Math.round((dmg0 - hp()) * 1000) / 1000, m: mech() };
+    }
+    var base = run(null, 0);
+    if (base.hitRel < 0) return { error: "no-hit", dtMs: Math.round(d * 1e6) / 1000 };
+    var t0 = base.tHit - base.hitRel * d;              // 相对帧 0 的游戏时刻
+    var want = base.tHit + spec.offMs / 1000;          // 目标真实按下时刻
+    var p = Math.ceil((want - t0) / d - 1e-9) + 1;     // 采样帧 = 第一个起始时刻 >= want 的帧
+    var startP = t0 + (p - 1) * d;                     // 该帧起始时刻
+    var fold = spec.fold !== false;
+    // main.js 的 vAgeMs = 真实按下到本帧采样之间的毫秒数（combat 拿它把 pressTime 折回帧内）
+    var ageMs = fold ? Math.max(0, Math.min(100, (startP - want) * 1000)) : 0;
+    var wp = run(p, ageMs);
+    var m = wp.m;
+    var W = (spec.winMs || 16.7) / 1000;
+    var late = p > base.hitRel;
+    return {
+      dtMs: Math.round(d * 1e6) / 1000, offMs: spec.offMs, fold: fold,
+      hitRel: base.hitRel, pressRel: p, pressFramesBeforeHit: base.hitRel - p,
+      late: late, ageMs: Math.round(ageMs * 1000) / 1000,
+      ok: m.ok, why: m.why, dmg: wp.dmg, baseDmg: base.dmg,
+      ratio: base.dmg > 0 ? Math.round((wp.dmg / base.dmg) * 100) / 100 : 0,
+      F: m.F, P: m.P, tF: m.tF, tP: m.tP, dtJudgeMs: m.dtMs, winMs: m.winMs,
+      // 备选规则：以「命中帧起始时刻」为基准 ±W（仍要求按下在命中帧或之前被采样到）
+      altOk: !late && Math.abs((m.tF - d) - m.tP) <= W + 1e-9
+    };
+  }
+  R.timingTrial = timingTrial;
   R.ready = function () { return !!(window.__SS && window.__SS.combat && window.__SS.mech().blackFlash); };
   R.place = place;
   R.punch = punch;
@@ -441,14 +487,18 @@ async function run() {
   ok('每次挥击有收缩环，且在命中帧收缩到 0', base.ringsSpawned >= 1 && base.ringsSnapped >= 1, 'spawned=' + base.ringsSpawned + ' snapped=' + base.ringsSnapped + ' 预测误差=' + base.ringErrMax + ' 帧');
   const hitRel = base.hitRel;
   const rows = [];
+  // P0 时间窗（W=16.7ms、基准=命中帧起始）后的期望：60fps 下 0/1 帧在窗内，2 帧（33.3ms）已超窗
   const wantOk = { 0: true, 1: true, 2: false, 3: false, 4: false };
   for (const k of [0, 1, 2, 3, 4]) {
     const r = await b.evaluate('window.__BF.punch(' + J({ lead: hitRel, delta: k }) + ')');
-    rows.push({ k: k, delta: r.judge ? r.judge.delta : null, ok: r.judge ? r.judge.ok : null, why: r.judge ? r.judge.why : null, bf: r.bf, dmg: r.dmg, mul: r.mul, ceSpent: r.ceSpent, ceAtJudge: r.ceAtJudge, bfEvents: r.bfEvents });
+    rows.push({ k: k, delta: r.judge ? r.judge.delta : null, dtMs: r.judge ? r.judge.dtMs : null, winMs: r.judge ? r.judge.winMs : null, ok: r.judge ? r.judge.ok : null, why: r.judge ? r.judge.why : null, bf: r.bf, dmg: r.dmg, mul: r.mul, ceSpent: r.ceSpent, ceAtJudge: r.ceAtJudge, bfEvents: r.bfEvents });
     log('  P=F-' + k + ' (delta=' + (r.judge ? r.judge.delta : '?') + '): ok=' + (r.judge ? r.judge.ok : '?') + ' why=' + (r.judge ? r.judge.why : '?') + ' bf=' + r.bf + ' dmg=' + r.dmg + ' mul=' + r.mul + ' ceSpent=' + r.ceSpent);
     ok('delta=' + k + ' ' + (wantOk[k] ? '同步成功' : '不算黑闪'), !!(r.judge && r.judge.ok === wantOk[k] && r.judge.delta === k), '实测delta=' + (r.judge ? r.judge.delta : '?') + ' why=' + (r.judge ? r.judge.why : '?'));
   }
   results.data.matrix = rows;
+  ok('P0 时间窗（基准=命中帧起始）：命中帧内按下成功', rows[0].ok === true, 'delta=' + rows[0].delta + ' dtMs=' + rows[0].dtMs + ' winMs=' + rows[0].winMs);
+  ok('P0 时间窗：前一帧按下（|Δ|≈16.7ms）仍在窗内 -> 成功（等价恢复旧的 ±1 帧）', rows[1].ok === true, 'delta=' + rows[1].delta + ' dtMs=' + rows[1].dtMs);
+  ok('P0 时间窗：两帧之前（33.3ms）超出 -> 不算黑闪', rows[2].ok === false && (rows[2].why === 'nosync' || rows[2].why === 'chaos'), 'delta=' + rows[2].delta + ' dtMs=' + rows[2].dtMs + ' why=' + rows[2].why);
   const bfRow = rows[0], normalRow = base;
   const ratio = bfRow.dmg / normalRow.dmg;
   results.data.damageRatio = Math.round(ratio * 1000) / 1000;
@@ -512,11 +562,20 @@ async function run() {
   const chRatio = ch[5].dmg / base.dmg;
   ok('第 5 次黑闪伤害 = 普通命中 x3.5', Math.abs(chRatio - 3.5) < 0.03, 'dmg=' + ch[5].dmg + ' ratio=' + (Math.round(chRatio * 1000) / 1000));
   ok('连闪链每一发都真的打出黑闪', ch.every((x) => x.judge && x.judge.ok === true), J(ch.map((x) => x.judge && x.judge.delta)));
-  const touch = await b.evaluate('(function () { document.documentElement.classList.add("is-touch"); var r = window.__BF.punch(' + J({ lead: hitRel, delta: 2 }) + '); document.documentElement.classList.remove("is-touch"); return { win: r.win, ok: r.judge && r.judge.ok, delta: r.judge && r.judge.delta, bf: r.bf }; })()');
-  results.data.touch = touch;
-  log('  触屏窗口: delta=-2 时 ' + J(touch) + '（桌面基准 win=' + base.win + '）');
-  ok('触屏 html.is-touch -> 窗口放宽到 ±2 帧', touch.win === 2 && touch.ok === true, 'win=' + touch.win + ' delta=' + touch.delta);
-  ok('桌面窗口 baseline = ±1 帧', base.win === 1, 'win=' + base.win);
+  // P0 时间窗：窗口宽度用 1/144 步进量（6.94ms/帧）才看得出差异
+  const base144 = await b.evaluate('window.__BF.punch(' + J({ lead: null, dt: 1 / 144 }) + ')');
+  const hitRel144 = base144.hitRel;
+  const desk144 = await b.evaluate('window.__BF.punch(' + J({ lead: hitRel144, delta: 2, dt: 1 / 144 }) + ')');
+  const touch144 = await b.evaluate('(function () { document.documentElement.classList.add("is-touch"); var r = window.__BF.punch(' + J({ lead: hitRel144, delta: 4, dt: 1 / 144 }) + '); document.documentElement.classList.remove("is-touch"); return r; })()');
+  const touch144b = await b.evaluate('(function () { document.documentElement.classList.add("is-touch"); var r = window.__BF.punch(' + J({ lead: hitRel144, delta: 5, dt: 1 / 144 }) + '); document.documentElement.classList.remove("is-touch"); return r; })()');
+  results.data.touchWindow = { hitRel144: hitRel144, deskDelta2: desk144.judge, touchDelta2: touch144.judge, touchDelta4: touch144b.judge };
+  log('  1/144 步进（6.94ms/帧）：桌面 delta=2 -> ' + J(desk144.judge) + '；触屏 delta=2 -> ' + J(touch144.judge) + '；触屏 delta=4 -> ' + J(touch144b.judge));
+  ok('桌面 16.7ms：1/144 下 delta=2（13.9ms）在窗内 -> 成功', desk144.judge && desk144.judge.ok === true, 'dtMs=' + (desk144.judge && desk144.judge.dtMs) + ' winMs=' + (desk144.judge && desk144.judge.winMs));
+  const desk144b = await b.evaluate('window.__BF.punch(' + J({ lead: hitRel144, delta: 3, dt: 1 / 144 }) + ')');
+  ok('桌面 16.7ms：1/144 下 delta=3（20.8ms）超出窗口 -> 失败', desk144b.judge && desk144b.judge.ok === false, 'dtMs=' + (desk144b.judge && desk144b.judge.dtMs));
+  ok('触屏 33ms：delta=4（27.8ms，桌面会失败）成功 -> 窗口确实放宽', touch144.judge && touch144.judge.ok === true && touch144.win === 2, 'dtMs=' + (touch144.judge && touch144.judge.dtMs) + ' winMs=' + (touch144.judge && touch144.judge.winMs));
+  ok('触屏窗口上限 33ms：delta=5（34.7ms）仍然失败', touch144b.judge && touch144b.judge.ok === false, 'dtMs=' + (touch144b.judge && touch144b.judge.dtMs));
+  ok('桌面 baseline win=1 / 触屏 win=2（帧等效展示）', base.win === 1 && touch144.win === 2, 'desk=' + base.win + ' touch=' + touch144.win);
 
   log('');
   log('== 5. 可读性（收缩环 / 1 帧闪点 / 截图）==');
@@ -563,6 +622,50 @@ async function run() {
   ok('低画质下机制完整（环 / 闪点 / 2.5 倍）', q2 === 'low' && lowBase.ringsSpawned >= 1 && lowBase.dotsSpawned >= 1 && lowBF.judge && lowBF.judge.ok === true, J(results.data.low));
   await sleep(500);
   await shot('04-low-quality-bf');
+
+  log('');
+  log('== 8. P0 帧率公平性：vAgeMs 亚帧折算 + 时间窗（W=16.7ms 桌面 / 33ms 触屏）==');
+  const fair = [];
+  for (const fps of [30, 60, 144]) {
+    for (const off of [-8, 8, -40, 40]) {
+      const r = await b.evaluate('window.__BF.timingTrial(' + J({ dt: 1 / fps, offMs: off, fold: true }) + ')');
+      fair.push(Object.assign({ fps: fps }, r));
+      log('  [折算开] dt=1/' + fps + '（' + r.dtMs + 'ms/帧） off=' + (off > 0 ? '+' : '') + off + 'ms -> ok=' + r.ok +
+        ' why=' + (r.why || '-') + ' dmg=' + r.dmg + '（基准 ' + r.baseDmg + '）dtMs=' + r.dtJudgeMs +
+        ' pressRel=' + r.pressRel + ' hitRel=' + r.hitRel + (r.late ? ' [采样晚于命中帧]' : ''));
+    }
+  }
+  results.data.fairness = fair;
+  const pre = [];
+  for (const fps of [30, 60, 144]) {
+    for (const off of [-8, 8, -40, 40]) {
+      const r = await b.evaluate('window.__BF.timingTrial(' + J({ dt: 1 / fps, offMs: off, fold: false }) + ')');
+      pre.push({ fps: fps, offMs: off, ok: r.ok, why: r.why, dtJudgeMs: r.dtJudgeMs });
+      log('  [折算关] dt=1/' + fps + '  off=' + (off > 0 ? '+' : '') + off + 'ms -> ok=' + r.ok + ' why=' + (r.why || '-') + ' dtMs=' + r.dtJudgeMs);
+    }
+  }
+  results.data.preFold = pre;
+  const sweep = [];
+  for (const fps of [30, 60, 144]) {
+    const acc = [], accAlt = [];
+    for (let off = -80; off <= 6; off += 2) {
+      const r = await b.evaluate('window.__BF.timingTrial(' + J({ dt: 1 / fps, offMs: off, fold: true }) + ')');
+      if (r.ok) acc.push(off);
+      if (r.altOk) accAlt.push(off);
+    }
+    const wid = (x) => x.length ? (Math.max(...x) - Math.min(...x) + 2) : 0;
+    sweep.push({ fps: fps, acc: acc, widthMs: wid(acc), accAlt: accAlt, altWidthMs: wid(accAlt) });
+    log('  折算开 dt=1/' + fps + ' 被接受: ' + J(acc) + ' -> 宽度 ' + wid(acc) + 'ms（备选规则 基准=命中帧起始: ' + J(accAlt) + ' -> ' + wid(accAlt) + 'ms）');
+  }
+  results.data.sweep = sweep;
+  const w30 = sweep[0].widthMs, w60 = sweep[1].widthMs, w144 = sweep[2].widthMs;
+  const late40 = fair.filter((x) => x.offMs === 40);
+  ok('命中后 40ms：三种帧率都不算黑闪（因果：命中已结算）', late40.every((x) => x.ok === false), J(late40.map((x) => x.fps + ':' + x.ok)));
+  ok('折算开：144fps 下「命中前 8ms」成立', fair.some((x) => x.fps === 144 && x.offMs === -8 && x.ok === true), J(fair.filter((x) => x.offMs === -8).map((x) => x.fps + 'fps:' + x.ok)));
+  ok('30/60fps 的「命中前 8ms」确实是采样晚于命中帧（输入每帧只采一次）', fair.filter((x) => x.offMs === -8 && x.fps !== 144).every((x) => x.late === true && x.ok === false), J(fair.filter((x) => x.offMs === -8).map((x) => x.fps + 'fps late=' + x.late + ' ok=' + x.ok)));
+  const altW = sweep.map((s) => s.altWidthMs);
+  ok('备选规则（以命中帧起始为基准 ±W）三种帧率宽度一致（极差 <= 3ms）', Math.max(...altW) - Math.min(...altW) <= 3, '30/60/144 = ' + altW.join('/') + 'ms；现规则 = ' + [w30, w60, w144].join('/') + 'ms');
+  log('  结论数字: 现规则 30/60/144 = ' + w30 + '/' + w60 + '/' + w144 + 'ms；备选规则 = ' + altW.join('/') + 'ms');
 
   log('');
   log('== 7. 触屏「咒」按钮（844x390 + is-touch + CDP 真实 touch 事件）==');

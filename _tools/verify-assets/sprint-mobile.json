@@ -1,7 +1,7 @@
 {
   "name": "sprint-mobile",
-  "file": "tmp/sprint/dist.html",
-  "url": "file:///C%3A/Users/Administrator/Desktop/dsh/%E6%96%B0%E5%AE%BF%E5%AF%B9%E5%86%B3/tmp/sprint/dist.html",
+  "file": "dist/新宿决战.html",
+  "url": "file:///C%3A/Users/Administrator/Desktop/dsh/%E6%96%B0%E5%AE%BF%E5%AF%B9%E5%86%B3/dist/%E6%96%B0%E5%AE%BF%E5%86%B3%E6%88%98.html",
   "mobile": true,
   "viewport": [
     844,
@@ -44,7 +44,7 @@
     {
       "name": "§7 手机摇杆推到底触发疾跑（v >= 9.5）",
       "pass": true,
-      "detail": "v=10.735"
+      "detail": "v=10.786"
     },
     {
       "name": "§7 手机 phase=sprint",
@@ -58,18 +58,18 @@
     },
     {
       "name": "§7 边界 0.90（未过 0.92）不疾跑",
-      "pass": false,
-      "detail": "phase 集合=[\"sprint\",\"run\",\"walk\"]"
+      "pass": true,
+      "detail": "phase 集合=[\"walk\"]"
     },
     {
       "name": "§7 边界 0.95（过了 0.92）触发疾跑",
       "pass": true,
-      "detail": "v=1.456"
+      "detail": "v=3.395"
     },
     {
       "name": "手机 摇杆回中不位移",
       "pass": true,
-      "detail": "位移=0.214m"
+      "detail": "位移=0.000m"
     },
     {
       "name": "全流程无页面错误",
@@ -79,5 +79,5 @@
   ],
   "notes": [],
   "pageErrors": [],
-  "seconds": 13.7
+  "seconds": 18.3
 }

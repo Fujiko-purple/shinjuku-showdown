@@ -2288,6 +2288,16 @@
       frame: 0,
       /** >0 时双方冻结（魔虚罗召唤等阶段演出由机制模块自己写这个值） */
       phaseLock: 0,
+      /**
+       * 每个按键「按下边沿」的**游戏时间**。
+       * 帧号判定（pressFrame）在高刷屏上会变严：同一份「±1 帧」在 139fps 下只有 ±7.2ms，
+       * 在 60fps 下才是 ±16.7ms —— 同样的操作在 144Hz 显示器上会难一倍。
+       * 需要和帧率无关时用 pressTime 做时间窗判定（顿帧期间 cb.time 冻结，正好等价）。
+       */
+      pressTime: {
+        light: -999, heavy: -999, blue: -999, red: -999, purple: -999, heal: -999,
+        dodge: -999, dash: -999, domain: -999, lockOn: -999, charge: -999, v: -999, mouse: -999
+      },
       /** 每个按键最近一次「按下边沿」的帧号（机制模块读它做精确判定） */
       pressFrame: {
         light: -999, heavy: -999, blue: -999, red: -999, purple: -999, heal: -999,
@@ -2461,6 +2471,8 @@
       cur.moveZ = Number(src.moveZ) || 0;
       for (const k of BTN) cur[k] = !!src[k];
       cur.mouse.pressed = !!(src.mouse && src.mouse.pressed);
+      /** 亚帧按下年龄（仅 V 用，见 update2 的 pressTime 折算） */
+      cur.vAgeMs = Math.max(0, Math.min(100, Number(src.vAgeMs) || 0));
       for (const k of BTN) edges[k] = cur[k] && !prev[k];
       edges.mouse = cur.mouse.pressed && !prev.mouse.pressed;
     }
@@ -2652,7 +2664,15 @@
       readInput(input);
       cb.edges = edges;
       /** 记录每个按键的「按下帧」：精确判定（黑闪）用帧号，不用时间 —— 顿帧的 dt=0 不会让它漂 */
-      for (const k in edges) if (edges[k]) cb.pressFrame[k] = cb.frame;
+      for (const k in edges) if (edges[k]) {
+        cb.pressFrame[k] = cb.frame;
+        /**
+         * 亚帧修正：输入每帧只采样一次，所以「命中前 8ms 按下」在低帧率下会被记到命中帧之后。
+         * main.js 给了 V 键真实按下时刻到本帧采样的延迟 vAgeMs，这里把它折回帧内，
+         * 让 30/60/144fps 下「真实按下时刻」的判定一致（黑闪的 ±16.7ms 时间窗依赖它）。
+         */
+        cb.pressTime[k] = cb.time - (k === "v" ? cur.vAgeMs / 1000 : 0);
+      }
       const pl = cb.fighters[SIDE.GOJO];
       const sk = cb.fighters[SIDE.SUKUNA];
       if (cb.hitstop > 0) {
@@ -2967,6 +2987,9 @@
       },
       get pressFrame() {
         return cb.pressFrame;
+      },
+      get pressTime() {
+        return cb.pressTime;
       },
       get edges() {
         return cb.edges;

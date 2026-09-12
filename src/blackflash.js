@@ -11,14 +11,23 @@
  *   它不是能靠意志控制的技巧 —— 连最强术师也无法随意打出；威力是普通打击的 2.5 倍，
  *   打出之后术师的咒力操作会变好（连闪更容易）。
  *
- * 游戏映射
- *   - 1 帧 ≈ 16.7ms ≈ 原作 1e-6 秒级的极微误差：
- *       命中帧 F = cb.frame，按下同步键 V 的帧 P = cb.pressFrame.v，
- *       |F - P| <= 窗口（默认 1 帧）才算同步成功。
- *     用帧号而不是时间：顿帧（hitstop）期间 dt = 0 但 cb.frame 照常 +1，
- *     用时间会让窗口在顿帧里"消失"，帧号判定才可复现。
- *   - 反乱按（本模块最关键的难点）：V 的按下边沿只要**不落在任何命中帧的
- *     ±1 帧内** -> 0.6s 咒力紊乱（紊乱期间 V 一律无效）+ 扣 5 CE。
+ * 游戏映射（P0 帧率公平性版）
+ *   - 判定用**时间窗**，基准是**命中帧的起始时刻**：
+ *       ok = |tRef - tP| <= W
+ *     其中 tRef = 命中帧起始的游戏时间（= 结算时刻 cb.time - 本帧 dt，用上一帧 tick
+ *     记下的 cb.time 取；没有就退回结算时刻）、tP = 按下那一刻的游戏时间 cb.pressTime.v，
+ *     W = 0.0167s（桌面）/ 0.033s（触屏），连闪>=2 / 掌握期各再加 0.0167，上限 0.033。
+ *     为什么基准必须是帧起始而不是结算时刻：输入每帧只采样一次，命中是在帧内结算的，
+ *     用结算时刻当基准会给低帧率白送一整帧宽限（30fps 34ms / 60fps 16ms），
+ *     而高帧率只有 10ms —— 同一份手速在高刷上反而更吃亏。换成帧起始后，
+ *     实测真实可接受区间是 30/60/144fps = 18/16/16ms（差 2ms 以内，见 probe 第 8 节）。
+ *     顿帧期间 cb.time 冻结（update2 在 hitstop 时早退），时间窗天然等价于
+ *     「同一瞬间」，不需要特判。
+ *   - 反乱按的「命中附近」判据同时认两个基准（帧起始 ±W 或 结算时刻 ±W）：
+ *     否则会出现「判定算成功、反乱按却算乱按」的自相矛盾。
+ *   - 反乱按（本模块最关键的难点）：V 的按下边沿只要**不落在任何命中时刻的
+ *     ±W 内** -> 0.6s 咒力紊乱（紊乱期间 V 一律无效）+ 扣 5 CE。
+ *     判据同样用时间：若用帧判，高刷下会出现「判定算成功、反乱按却算乱按」的矛盾。
  *     -> 每帧连点 / 随机乱按都永远出不了黑闪（契约 §6 硬性验收）。
  *   - 可读性（不能变成纯记忆题）：每次挥击在拳/脚上生成一个收缩环，
  *     正好在命中帧收缩到 0；命中帧无论成败都有 1 帧闪点（成功金 / 失败灰）。
@@ -34,8 +43,8 @@
  * 契约里没定义、由本实现定的两条（已在报告里说明）
  *   1) 连闪链的断裂条件：乱按（咒力紊乱）或距上次黑闪 > 10s；
  *      冷却期内的普通命中**不**断链（否则 3.2s 冷却下永远连不上第二发）。
- *   2) 「连闪加成窗口上限 2 帧」按字面执行：基础 1 帧 +（连闪>=2 / 掌握期 / 触屏）
- *      各 1 帧，最终 clamp 到 ±2 帧。
+ *   2) 窗口加成改为时间：基础 0.0167s +（连闪>=2 / 掌握期 / 触屏）各 0.0167s，
+ *      最终 clamp 到 0.033s（±2 帧等效）。
  * ============================================================================
  */
 var BlackFlash = (function () {
@@ -43,8 +52,18 @@ var BlackFlash = (function () {
   /* ==========================================================================
    * 1. 常量（契约 §6）
    * ======================================================================== */
-  var WIN_BASE = 1;          // 基础同步窗口：±1 帧
-  var WIN_MAX = 2;           // 窗口硬上限：±2 帧（连闪/掌握/触屏叠加后也不超过）
+  var WIN_BASE = 1;          // 帧等效窗口（仅 debug 展示用）
+  var WIN_MAX = 2;           // 帧等效硬上限（仅 debug 展示用）
+  /**
+   * P0 · 帧率公平性：判定窗口从「±1 帧」改成「时间窗」。
+   * 本作 rAF 跑在刷新率上（无头实测 139fps），±1 帧在 144Hz 上只有 ±6.9ms，
+   * 而 60fps 有 ±16.7ms —— 同样的操作在高刷上难一倍，那是「看显示器」不是难度。
+   * 现在：ok = (P === F) || (|tF - tP| <= W)，W 与刷新率无关。
+   */
+  var WIN_SEC = 0.0167;      // 桌面时间窗（秒）≈ 1 帧 @60fps
+  var WIN_SEC_TOUCH = 0.033; // 触屏时间窗（±2 帧等效）
+  var WIN_SEC_MAX = 0.033;   // 时间窗上限
+  var WIN_SEC_STEP = 0.0167; // 连闪 / 掌握期各 +1 帧等效
   var CE_REQ = 8;            // 硬性前提：命中时 ce >= 8
   var CE_COST = 8;           // 黑闪成功时消耗 8 咒力
   var BF_CD = 3.2;           // 黑闪冷却（契约 §6 的 BLACK_FLASH_CD = 3.2s）
@@ -70,6 +89,10 @@ var BlackFlash = (function () {
     return {
       cb: cb,
       hitFrames: [],         // 最近若干个「玩家近战命中帧」
+      hitTimes: [],          // 与 hitFrames 一一对应的命中「结算时刻」（反乱按用）
+      hitRefs: [],           // 命中帧的**起始时刻**（= 结算时刻 - 本帧 dt）—— 判定基准
+      lastTickTime: -999,    // 上一帧 tick 时的 cb.time（= 本帧起始时刻，顿帧冻结期间自动等价）
+      lastDt: 1 / 60,
       pending: [],           // 待定按压：按下瞬间无法立刻判定（命中可能在下一帧）
       lastPressSeen: -999,   // 上一次读到的 cb.pressFrame.v
       presses: 0,            // 累计按下 V 次数
@@ -278,14 +301,34 @@ var BlackFlash = (function () {
   /* ==========================================================================
    * 5. 命中帧 / 窗口 / 倍率
    * ======================================================================== */
-  function rememberHitFrame(st, f) {
+  function rememberHitFrame(st, f, t, tRef) {
     st.hitFrames.push(f);
-    if (st.hitFrames.length > HITFRAME_KEEP) st.hitFrames.splice(0, st.hitFrames.length - HITFRAME_KEEP);
+    st.hitTimes.push(t);
+    st.hitRefs.push(tRef);
+    if (st.hitFrames.length > HITFRAME_KEEP) {
+      st.hitFrames.splice(0, st.hitFrames.length - HITFRAME_KEEP);
+      st.hitTimes.splice(0, st.hitTimes.length - HITFRAME_KEEP);
+      st.hitRefs.splice(0, st.hitRefs.length - HITFRAME_KEEP);
+    }
   }
-  /** 某个按下帧是否落在「任意命中帧 ±win」内 —— 反乱按与合法同步共用同一条判据 */
-  function hasHitNear(st, p, win) {
+  /**
+   * 某个「按下时刻」是否落在「任意命中时刻 ±W」内 —— 反乱按与合法同步共用同一条判据。
+   * 这里也用时间（而不是帧）判，否则高刷下会出现「判定算成功、反乱按却算乱按」的矛盾：
+   * 144fps 时 8ms 的差 = 1.1 帧，帧判据会误判成窗口外。
+   */
+  function hasHitNear(st, time, sec) {
+    // 命中「附近」= 落在命中帧起始基准的 ±W 内，或落在结算时刻之后的 ±W 内。
+    // 两者都算合法同步尝试：判定用前者（公平），后者只是不去罚「稍晚一点的手」。
+    for (var i = 0; i < st.hitTimes.length; i++) {
+      if (Math.abs(st.hitRefs[i] - time) <= sec + 1e-9) return true;
+      if (Math.abs(st.hitTimes[i] - time) <= sec + 1e-9) return true;
+    }
+    return false;
+  }
+  /** 老构建的兜底：没有 cb.pressTime 时按帧判 */
+  function hasHitNearFrames(st, frame, win) {
     for (var i = 0; i < st.hitFrames.length; i++) {
-      var d = st.hitFrames[i] - p;
+      var d = st.hitFrames[i] - frame;
       if (d <= win && d >= -win) return true;
     }
     return false;
@@ -299,6 +342,15 @@ var BlackFlash = (function () {
     if (isTouch()) w += 1;            // 触屏操作精度更低
     return Math.min(WIN_MAX, w);
   }
+  /** 当前同步窗口（秒）：基础 0.0167 +（连闪>=2 / 掌握期 / 触屏）各 0.0167，上限 0.033 */
+  function windowSec(st) {
+    var w = WIN_SEC;
+    if (!st) return w;
+    if (st.chain >= 2) w += WIN_SEC_STEP;
+    if (st.masteryT > 0) w += WIN_SEC_STEP;
+    if (isTouch()) w += WIN_SEC_STEP;
+    return Math.min(WIN_SEC_MAX, w);
+  }
   /** 连闪 n 次时的倍率：min(3.5, 2.5 + 0.25*(n-1)) */
   function mulOf(n) {
     var v = MUL_BASE + MUL_STEP * (Math.max(1, n | 0) - 1);
@@ -308,6 +360,23 @@ var BlackFlash = (function () {
     if (!cb || !cb.pressFrame) return -999;
     var v = cb.pressFrame.v;
     return (typeof v === "number" && isFinite(v)) ? (v | 0) : -999;
+  }
+  function numberOr(v, d) { return (typeof v === "number" && isFinite(v)) ? v : d; }
+  /** V 按下那一刻的游戏时间（combat.js 的 cb.pressTime.v）；老构建没有这个字段时返回 -999 */
+  function pressTimeOf(cb) {
+    if (!cb || !cb.pressTime) return -999;
+    var v = cb.pressTime.v;
+    return (typeof v === "number" && isFinite(v) && v > -800) ? v : -999;
+  }
+  /**
+   * 同步判定（P0 契约）：ok = (P === F) || (|tF - tP| <= W)
+   *   - P === F：同一帧内按下。低帧率（30/60fps）下这是唯一可行解，必须保留。
+   *   - 时间窗：与刷新率无关，144Hz 不再被压缩成 ±7ms。
+   *   - 没有 cb.pressTime（老构建）时退回帧判据。
+   */
+  function synced(cb, F, P, tRef, tP, W, win) {
+    if (tP > -800) return Math.abs(tRef - tP) <= W + 1e-9;
+    return !(P < -900) && Math.abs(F - P) <= win;   // 老构建没有 pressTime：退回帧判据
   }
   function hitPos(h) {
     try {
@@ -334,10 +403,21 @@ var BlackFlash = (function () {
     if (!st || !pl) return false;
     var F = cb.frame | 0;
     var P = pressFrameOf(cb);
-    var win = windowFrames(st);
+    var tP = pressTimeOf(cb);
+    var tF = numberOr(cb.time, 0);       // 结算时刻（本帧 cb.time += dt 之后）
+    /**
+     * 判定基准 = **命中帧的起始时刻**（tF - 本帧 dt），不是结算时刻。
+     * 用结算时刻会让低帧率白拿一整帧宽限（30fps 34ms / 60fps 16ms），而高帧率只有 10ms ——
+     * 同一份手速在高刷上更吃亏。换成帧起始后三档的真实可接受区间都是 ~16.7ms（实测 18/16/16ms）。
+     * 帧起始时刻用上一帧 tick 记下的 cb.time；没有（首帧/异常）就退回结算时刻。
+     */
+    var tRef = (st.lastTickTime > -800 && st.lastTickTime <= tF) ? st.lastTickTime : tF;
+    var win = windowFrames(st);          // 帧等效窗口（debug / 老构建兜底）
+    var W = windowSec(st);               // 真正参与判定的时间窗（秒）
     var delta = F - P;
+    var dT = (tP > -800 && isFinite(tP)) ? Math.abs(tP - tRef) : -1;   // 相对判定基准的秒数；-1 = 没有按下时刻
     st.hits++;
-    rememberHitFrame(st, F);
+    rememberHitFrame(st, F, tF, tRef);
     snapRings(st, cb, F);                 // 命中帧：收缩环贴到 0
     var pos = hitPos(h);
     var ok = false;
@@ -345,10 +425,10 @@ var BlackFlash = (function () {
     if (st.chaosT > 0) why = "chaos";
     else if (st.cd > 0) why = "cooldown";
     else if (!(pl.ce >= CE_REQ)) why = "ce";
-    else if (P < -900 || Math.abs(delta) > win) why = "nosync";
+    else if (!synced(cb, F, P, tRef, tP, W, win)) why = "nosync";
     else ok = true;
     /** 是否"尝试过同步"（按过 V 且离命中帧不远）—— 决定要不要给细字提示 */
-    var attempted = P > -900 && Math.abs(delta) <= win + 3;
+    var attempted = (tP > -800) ? (dT <= W + 0.05) : (P > -900 && Math.abs(delta) <= win + 3);
     var mul = 0;
     if (ok) {
       mul = mulOf(st.chain + 1);
@@ -358,9 +438,11 @@ var BlackFlash = (function () {
       st.cd = BF_CD;
       st.masteryT = MASTERY_T;
       pl.ce = Math.max(0, pl.ce - CE_COST);
-      resolveNear(st, F, win);            // 命中帧附近的待定按压是合法同步，不是乱按
+      resolveNear(st, F, tF, win, W);      // 命中帧附近的待定按压是合法同步，不是乱按
       st.last = {
         frame: F, press: P, delta: delta, mul: Math.round(mul * 100) / 100,
+        tF: Math.round(tF * 10000) / 10000, tP: Math.round(tP * 10000) / 10000,
+        dtMs: dT >= 0 ? Math.round(dT * 1e6) / 1000 : -1,
         chain: st.chain, skill: h.skill, dmg: Math.round((dmg || 0) * mul * 10) / 10
       };
     } else {
@@ -381,6 +463,10 @@ var BlackFlash = (function () {
     spawnDot(cb, pos, ok);                // 命中帧无论成败都有 1 帧闪点
     st.lastJudge = {
       frame: F, press: P, delta: delta, win: win, ok: ok, why: why,
+      tF: Math.round(tF * 10000) / 10000, tP: Math.round(tP * 10000) / 10000,
+      tRef: Math.round(tRef * 10000) / 10000,
+      dtMs: dT >= 0 ? Math.round(dT * 1e6) / 1000 : -1,
+      winMs: Math.round(W * 1e6) / 1000,
       mul: Math.round(mul * 100) / 100, ce: Math.round(pl.ce * 10) / 10, attempted: attempted
     };
     return ok ? mul : false;
@@ -392,10 +478,12 @@ var BlackFlash = (function () {
    * 立刻判死：先入待定队列，等 (cb.frame - P) > win 仍没有命中帧"救"它时才判乱按。
    * 每帧连点：每次按下都会在 win+1 帧后落成一次紊乱（紊乱时长被不断刷新）-> 永远封杀。
    * ======================================================================== */
-  function resolveNear(st, frame, win) {
+  function resolveNear(st, frame, tHit, win, W) {
     for (var i = st.pending.length - 1; i >= 0; i--) {
       var p = st.pending[i];
-      if (Math.abs(p.frame - frame) <= win) { st.pending.splice(i, 1); st.legit++; }
+      var near = (p.time > -800) ? (Math.abs(tHit - p.time) <= W + 1e-9)
+                                 : (Math.abs(p.frame - frame) <= win);
+      if (near) { st.pending.splice(i, 1); st.legit++; }
     }
   }
   function onMash(st, cb, p) {
@@ -416,25 +504,38 @@ var BlackFlash = (function () {
     } catch (e2) { /* 忽略 */ }
     try { cb.audio.play("whoosh", { volume: 0.35, rate: 1.5 }); } catch (e3) { /* 忽略 */ }
   }
-  function registerPress(st, cb, P) {
+  function registerPress(st, cb, P, tP) {
     st.presses++;
     var win = windowFrames(st);
-    st.lastPress = { frame: P, kind: "sync" };
-    if (hasHitNear(st, P, win)) {
-      // 命中帧 ±win 内的按下：合法同步尝试（哪怕这一发因为冷却/咒力打不出黑闪）
+    var W = windowSec(st);
+    var hasT = tP > -800;
+    var legitNow = hasT ? hasHitNear(st, tP, W) : hasHitNearFrames(st, P, win);
+    st.lastPress = { frame: P, time: hasT ? Math.round(tP * 10000) / 10000 : -1, kind: legitNow ? "sync" : "pending" };
+    if (legitNow) {
+      // 命中时刻 ±W 内的按下：合法同步尝试（哪怕这一发因为冷却/咒力打不出黑闪）
       st.legit++;
-      cb.bfWindowUntil = cb.time + (win + 1) / 60;   // 给 HUD 的"同步窗口"进度条用
+      cb.bfWindowUntil = cb.time + W;   // 给 HUD 的"同步窗口"进度条用
       return;
     }
-    st.pending.push({ frame: P });
+    st.pending.push({ frame: P, time: hasT ? tP : -999 });
     if (st.pending.length > PENDING_MAX) onMash(st, cb, st.pending.shift());
   }
   function resolvePending(st, cb) {
     var win = windowFrames(st);
+    var W = windowSec(st);
     for (var i = st.pending.length - 1; i >= 0; i--) {
       var p = st.pending[i];
-      if (hasHitNear(st, p.frame, win)) { st.pending.splice(i, 1); st.legit++; continue; }
-      if ((cb.frame | 0) - p.frame > win) { st.pending.splice(i, 1); onMash(st, cb, p); }
+      var hasT = p.time > -800;
+      var near = hasT ? hasHitNear(st, p.time, W) : hasHitNearFrames(st, p.frame, win);
+      if (near) { st.pending.splice(i, 1); st.legit++; continue; }
+      /**
+       * 到期的乱按判决：cb.time 单调不减，所以「按下时刻到现在已经超过 W」之后
+       * 不可能再有任何命中帧落进它的窗口 —— 这就是乱按。
+       * 顿帧期间 cb.time 冻结，判决自然顺延（等价于「同一瞬间」），不需要特判。
+       */
+      var expired = hasT ? ((numberOr(cb.time, 0) - p.time) > W + 1e-9)
+                         : (((cb.frame | 0) - p.frame) > win);
+      if (expired) { st.pending.splice(i, 1); onMash(st, cb, p); }
     }
   }
   /* ==========================================================================
@@ -449,6 +550,8 @@ var BlackFlash = (function () {
     var d = Number(dt) || 0;
     if (d < 0) d = 0;
     if (d > 0.1) d = 0.1;
+    st.lastTickTime = numberOr(t, cb.time);   // 本帧结束时刻 = 下一帧的起始时刻（判定基准）
+    st.lastDt = d;
     if (st.chaosT > 0) st.chaosT = Math.max(0, st.chaosT - d);
     if (st.cd > 0) st.cd = Math.max(0, st.cd - d);
     if (st.masteryT > 0) st.masteryT = Math.max(0, st.masteryT - d);
@@ -464,7 +567,7 @@ var BlackFlash = (function () {
        * cb.pressFrame 是 combat 的只读字段、不会跟着复位 —— 上一局遗留的帧号
        * 会被误判成「本局第 0 帧的一次按下」。只接受落在最近 2 秒内的帧号。
        */
-      if (pf > -900 && pf <= cb.frame && cb.frame - pf <= 120) registerPress(st, cb, pf);
+      if (pf > -900 && pf <= cb.frame && cb.frame - pf <= 120) registerPress(st, cb, pf, pressTimeOf(cb));
     }
     resolvePending(st, cb);
     // HUD / 旧接口兼容镜像（hud.js 的 snap.blackFlashReady 读 cb.bfWindowUntil）
@@ -664,6 +767,11 @@ var BlackFlash = (function () {
       F: lj ? lj.frame : -1,
       P: lj ? lj.press : -999,
       delta: lj ? lj.delta : 0,
+      tF: lj && typeof lj.tF === "number" ? lj.tF : -1,
+      tP: lj && typeof lj.tP === "number" ? lj.tP : -1,
+      tRef: lj && typeof lj.tRef === "number" ? lj.tRef : -1,
+      dtMs: lj && typeof lj.dtMs === "number" ? lj.dtMs : -1,
+      winMs: lj && typeof lj.winMs === "number" ? lj.winMs : Math.round(WIN_SEC * 1000 * 10) / 10,
       ok: !!(lj && lj.ok),
       ce: pl ? Math.round(pl.ce * 10) / 10 : -1,
       ceAtJudge: lj && typeof lj.ce === "number" ? lj.ce : -1,   // 判定成功瞬间扣完 8 之后的咒力

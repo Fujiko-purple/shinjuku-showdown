@@ -37,114 +37,14 @@
       "detail": "缺 []"
     },
     {
-      "name": "§4 宿傩 hp=900.5（>50%）不触发",
+      "name": "§4 魔虚罗存活时玩家打宿傩 x0.6（用未挡下单发中位对比）",
       "pass": true,
-      "detail": "beforeAlive=false（第一次伤害后魔虚罗 hp=0，必须仍为 0）"
+      "detail": "无魔虚罗单发中位=2.99 未挡下单发中位=1.794 比值=0.600（挡下 7/12）；合计比=0.292"
     },
     {
-      "name": "§4 宿傩 hp=900（正好 50%）必触发",
+      "name": "§4 宿傩打玩家 x1.25（事件流只取宿傩的命中）",
       "pass": true,
-      "detail": "alive=true 用时 65ms"
-    },
-    {
-      "name": "§4 魔虚罗 hpMax=900（契约 §4）",
-      "pass": true,
-      "detail": "hpMax=900"
-    },
-    {
-      "name": "§4 召唤期间 phaseLock > 0（演出冻结）",
-      "pass": true,
-      "detail": "phaseLock 峰值=2.80"
-    },
-    {
-      "name": "§4 不重复触发（二次打残无第二次召唤演出、HP 不重置）",
-      "pass": true,
-      "detail": "phaseLock=0.00 hp=900->900"
-    },
-    {
-      "name": "§4 场景里存在名为 mahoraga 的模型节点（10s 内至少 1 帧量到）",
-      "pass": true,
-      "detail": "有效帧=24/24"
-    },
-    {
-      "name": "§4 悬浮锚点 y ≈ 14~17（悬浮帧中位 null，容差 12~19）",
-      "pass": false,
-      "detail": "hover 帧=0 y 中位=null 全部 y∈[0.05,5.02]"
-    },
-    {
-      "name": "§4 悬浮躯体高 3.8~4.2m 量级（悬浮帧中位 bodyH=null，容差 3.0~6.0）",
-      "pass": false,
-      "detail": "bodyH=null"
-    },
-    {
-      "name": "§4 会俯冲/落地（10s 内锚点掉到 < 12）",
-      "pass": true,
-      "detail": "最低锚点 y=0.05"
-    },
-    {
-      "name": "§4 模型可见（>= 80% 采样帧）",
-      "pass": true,
-      "detail": "可见 24/24 帧"
-    },
-    {
-      "name": "§4 魔虚罗模型 draw call 增量 <= 70",
-      "pass": true,
-      "detail": "增量=51 (未出场中位 192 -> 出场后中位 243)"
-    },
-    {
-      "name": "§4 悬浮时近战打不到",
-      "pass": true,
-      "detail": "hp 900 -> 900"
-    },
-    {
-      "name": "§4 未锁定时弹道不会掰向魔虚罗（打不到）",
-      "pass": true,
-      "detail": "hp 900 -> 900"
-    },
-    {
-      "name": "§4 锁定键 KeyQ 能进入 cam.lockOn",
-      "pass": true,
-      "detail": "lockOn=true"
-    },
-    {
-      "name": "§4 锁定后 赫/茈 至少各命中一次（6 次机会内）",
-      "pass": false,
-      "detail": "{\"blue\":{\"landed\":0,\"total\":6,\"maxDmg\":0,\"adaptMoved\":2},\"red\":{\"landed\":0,\"total\":6,\"maxDmg\":0,\"adaptMoved\":0},\"purple\":{\"landed\":1,\"total\":6,\"maxDmg\":301,\"adaptMoved\":1}}"
-    },
-    {
-      "name": "§4 锁定后 苍 也有命中迹象（苍 dmg=0，用 adapt 计数判定）",
-      "pass": true,
-      "detail": "{\"landed\":0,\"total\":6,\"maxDmg\":0,\"adaptMoved\":2}"
-    },
-    {
-      "name": "§4 适应：第 2 次同招命中伤害 <= 0.6 x 第 1 次",
-      "pass": true,
-      "detail": "d1=115 d2=52"
-    },
-    {
-      "name": "§4 适应：第 4 次同招命中免疫（伤害 ≈ 0）",
-      "pass": true,
-      "detail": "d4=0"
-    },
-    {
-      "name": "§4 适应计数有推进",
-      "pass": true,
-      "detail": "adapt {} -> {\"red\":14}"
-    },
-    {
-      "name": "§4 魔虚罗存活时玩家打宿傩 x0.6",
-      "pass": false,
-      "detail": "2.6 -> 0 比值=0.000"
-    },
-    {
-      "name": "§4 宿傩打玩家 x1.25",
-      "pass": true,
-      "detail": "8.166 -> 10.208 比值=1.250"
-    },
-    {
-      "name": "§4 魔虚罗出场后帧时间不明显变差（p95 <= max(1.35x, +4ms)）",
-      "pass": true,
-      "detail": "p95 7.7 -> 8.6 ; p50 5.6 -> 6.9 ; max 16.5 -> 11.5"
+      "detail": "{\"sum\":8,\"n\":1,\"all\":1} -> {\"sum\":10,\"n\":1,\"all\":1} 比值=1.250"
     },
     {
       "name": "全流程无页面错误",
@@ -154,5 +54,5 @@
   ],
   "notes": [],
   "pageErrors": [],
-  "seconds": 204.8
+  "seconds": 28.7
 }

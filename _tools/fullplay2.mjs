@@ -37,7 +37,8 @@ const snap = () => ev(`(() => { const s = __SS.snap; if (!s) return null;
 // 页内「会玩的玩家」：领域对齐 + 黑闪卡帧，全部在 rAF 里做，帧级精度
 const AUTO = `(() => {
   // bfOffset = J 之后第几帧按 V。blackflash 作者实测命中帧在起手后 hitRel=8 帧（同一 rAF→下一帧的通道，偏移可直接用）
-  window.__AUTO = { duel: true, bf: true, bfOffset: 8, hits: 0, bfHits: 0, lastF: -1, deltas: [], presses: 0, lastJ: -99 };
+  // vDelayMs = 从 J 到按 V 的**真实时间**间隔（黑闪已改成时间窗判定，机器人也按时间标定）
+  window.__AUTO = { duel: true, bf: true, vDelayMs: 150, hits: 0, bfHits: 0, lastF: -1, deltas: [], presses: 0, lastJ: -99 };
   const press = (c, ms) => { window.__INJECT.press(c); setTimeout(() => window.__INJECT.release(c), ms || 16); };
   window.__AUTO.reset = () => { window.__AUTO.hits = 0; window.__AUTO.bfHits = 0; window.__AUTO.deltas = []; window.__AUTO.presses = 0; };
   (function loop() {
@@ -58,12 +59,15 @@ const AUTO = `(() => {
         if (bf.ok) A.bfHits++;
         A.hits++;
         // delta = F - P：>0 表示按早了，<0 表示按晚了
-        // 只在「真的判过同步」的样本上校准（未同步时 delta 可能是相对陈旧 P 的巨大值，会把偏移带飞）
-        if (!bf.ok && typeof bf.delta === 'number' && Math.abs(bf.delta) < 30) A.bfOffset += Math.max(-2, Math.min(2, bf.delta));
-        A.bfOffset = Math.max(3, Math.min(16, A.bfOffset));
+        // 校准：delta>0 = 按早了（要更晚按），delta<0 = 按晚了。只在真判过的样本上校准。
+        // 帧 → ms 用实测帧率换算（本机 rAF ≈140fps，1 帧 ≈ 7.1ms）。
+        if (!bf.ok && typeof bf.delta === 'number' && Math.abs(bf.delta) < 60) {
+          A.vDelayMs += Math.max(-25, Math.min(25, bf.delta * (1000 / Math.max(30, A.fps || 140))));
+        }
+        A.vDelayMs = Math.max(40, Math.min(400, A.vDelayMs));
       }
-      if (A.bf && frame - A.lastJ > 32) { A.lastJ = frame; press('KeyJ'); A.pendingV = frame + A.bfOffset; }
-      if (A.bf && A.pendingV && frame >= A.pendingV) { A.pendingV = 0; press('KeyV'); }
+      if (A.bf && frame - A.lastJ > 30) { A.lastJ = frame; press('KeyJ'); A.pendingV = performance.now() + A.vDelayMs; }
+      if (A.bf && A.pendingV && performance.now() >= A.pendingV) { A.pendingV = 0; press('KeyV'); }
     } catch (e) {}
     requestAnimationFrame(loop);
   })();

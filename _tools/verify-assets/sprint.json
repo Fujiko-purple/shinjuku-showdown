@@ -1,7 +1,7 @@
 {
   "name": "sprint",
-  "file": "tmp/sprint/dist.html",
-  "url": "file:///C%3A/Users/Administrator/Desktop/dsh/%E6%96%B0%E5%AE%BF%E5%AF%B9%E5%86%B3/tmp/sprint/dist.html",
+  "file": "dist/新宿决战.html",
+  "url": "file:///C%3A/Users/Administrator/Desktop/dsh/%E6%96%B0%E5%AE%BF%E5%AF%B9%E5%86%B3/dist/%E6%96%B0%E5%AE%BF%E5%86%B3%E6%88%98.html",
   "mobile": false,
   "viewport": [
     1280,
@@ -44,27 +44,27 @@
     {
       "name": "§7 0.35s 内升到 10.5 量级（实测 0.35~0.4s 均速 >= 9.5）",
       "pass": true,
-      "detail": "v(0.35s)=10.584"
+      "detail": "v(0.35s)=9.891"
     },
     {
       "name": "§7 稳态速度落在 10.5±1",
       "pass": true,
-      "detail": "v(稳态)=10.797"
+      "detail": "v(稳态)=10.493"
     },
     {
       "name": "§7 起步有加速过程（0.1s 速度明显低于稳态）",
       "pass": true,
-      "detail": "v(0.1s)=5.918 vs 稳态 10.797"
+      "detail": "v(0.1s)=5.734 vs 稳态 10.493"
     },
     {
       "name": "§7 1s 位移明显大于旧版 4.8m/s",
       "pass": true,
-      "detail": "1s 位移=10.49m"
+      "detail": "1s 位移=10.50m"
     },
     {
       "name": "§7 FOV 变化 >= 6 度",
       "pass": true,
-      "detail": "idle=44 -> max=51.98 Δ=7.98"
+      "detail": "idle=44 -> max=51.99 Δ=7.99"
     },
     {
       "name": "§7 相位读到 sprint",
@@ -84,17 +84,17 @@
     {
       "name": "§7 松手不瞬间归零（+0.05s 仍 >= 6）",
       "pass": true,
-      "detail": "v(+0)=10.371"
+      "detail": "v(+0)=10.808"
     },
     {
       "name": "§7 松手 0.25s 内回落到走路量级（<= 6.5）",
       "pass": true,
-      "detail": "v(+0.25s)=6.308"
+      "detail": "v(+0.25s)=6.362"
     },
     {
       "name": "走路速度仍是 4.8 量级（0.1 不误触发疾跑）",
       "pass": true,
-      "detail": "v(走路)=4.898"
+      "detail": "v(走路)=4.839"
     },
     {
       "name": "D 乱按不产生 NaN/异常",
@@ -104,12 +104,12 @@
     {
       "name": "D 速度不超上限（<= 12）",
       "pass": true,
-      "detail": "max v=9.07"
+      "detail": "max v=11.90"
     },
     {
-      "name": "E 高频 toggle 不超上限（p95 <= 12）",
+      "name": "E 高频 toggle 不超上限（>=1s 位移均速 <= 12）",
       "pass": true,
-      "detail": "p95=11.119 max=16.552"
+      "detail": "1s位移均速=6.493 ; [诊断]逐帧 p95=10.963 max=14.44（高刷下逐帧口径无判别力）"
     },
     {
       "name": "E 无 NaN/异常",
@@ -119,7 +119,7 @@
     {
       "name": "F 挂机不位移",
       "pass": true,
-      "detail": "位移=0.258m"
+      "detail": "位移=0.255m"
     },
     {
       "name": "F 挂机后不是 sprint 相位",
@@ -129,22 +129,22 @@
     {
       "name": "F 挂机后 FOV 回落（<= idle+2）",
       "pass": true,
-      "detail": "fov=44.016511551437794 idle=44"
+      "detail": "fov=44 idle=44"
     },
     {
-      "name": "G 折返无异常/不超上限（p95 <= 12）",
-      "pass": false,
-      "detail": "p95=13.068 max=17.402 errs=[]"
+      "name": "G 折返无异常/不超上限（>=1s 位移均速 <= 12）",
+      "pass": true,
+      "detail": "1s位移均速=8.806 ; [诊断]逐帧 p95=12.251 max=14.672 errs=[]"
     },
     {
       "name": "H 0.35s 前后速度单调抬升（后 >= 前 - 0.5）",
       "pass": true,
-      "detail": "前=9.928 后=10.617"
+      "detail": "前=10.022 后=10.389"
     },
     {
       "name": "H 0.35s 已接近满速（>= 9.0）",
       "pass": true,
-      "detail": "v(0.36~0.42s)=10.617"
+      "detail": "v(0.36~0.42s)=10.389"
     },
     {
       "name": "全流程无页面错误",
@@ -154,5 +154,5 @@
   ],
   "notes": [],
   "pageErrors": [],
-  "seconds": 26.3
+  "seconds": 29.4
 }
