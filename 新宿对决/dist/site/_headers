@@ -1,0 +1,5 @@
+/assets/three.js
+  Cache-Control: public, max-age=31536000, immutable
+
+/assets/game.js
+  Cache-Control: public, max-age=0, must-revalidate

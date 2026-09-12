@@ -1,0 +1,12 @@
+[
+  "core/rng.js",
+  "core/input.js",
+  "core/events.js",
+  "core/loop.js",
+  "data/characters.js",
+  "sim/hit.js",
+  "sim/world.js",
+  "view/scene.js",
+  "view/hud.js",
+  "main.js"
+]

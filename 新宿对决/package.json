@@ -1,0 +1,13 @@
+{
+  "name": "shinjuku-showdown",
+  "private": true,
+  "version": "0.1.0",
+  "description": "新宿对决：固定帧战斗内核 + 数据驱动招式表（M0）",
+  "type": "module",
+  "scripts": {
+    "build": "node build/build.mjs",
+    "build:single": "node build/build.mjs --single",
+    "probe": "node _tools/probe.mjs",
+    "serve": "node ../deploy/serve.mjs --dir dist/site --port 8173"
+  }
+}

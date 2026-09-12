@@ -6,6 +6,10 @@
 
 # 过程性截图：454 张 PNG，体积远大于源码本身，且是本地验收证据、不是交付物
 shots/
+
+# 美术参考原图（35 张漫画/动画扫描，13.5MB）：只留本地供建模对照。
+# 来源清单已经写进 research/E-manga-art-refs.md（那份是纯文字，可以公开）。
+reference/
 _tools/.wc-build/
 
 # 下载的第三方二进制（52MB）：任何人需要时用 deploy/README 里的命令自己下
