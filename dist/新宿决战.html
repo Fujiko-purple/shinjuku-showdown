@@ -1574,7 +1574,8 @@ html.is-touch .controls-grid { display: none !important; }
         <p data-page-node-id="uLq9gDMOdols1moImQWqgO"><b data-page-node-id="a24NZfaGdqtMELToYXXY82">H</b> 反转术式（自愈）</p>
         <p data-page-node-id="7ZkUUSNFE3kBwO7LvHMst5"><b data-page-node-id="4A2KoaVDAehPsRb6f1N651">G</b> 领域展开「无量空处」</p>
         <p data-page-node-id="bTsMCAuEvjK7T1XzyeDilk"><b data-page-node-id="UP2R3JbaIry4p1oicOqHGv">L</b> 起手式（蓄力 200% 茈）</p>
-        <p data-page-node-id="Lead0001MechHintDuel"><b data-page-node-id="Lead0001MechHintDuel2">领域对撞</b> 指针进窗口时按 <b data-page-node-id="Lead0001MechHintDuel3">J</b> 对齐（乱按必崩）</p>
+        <p data-page-node-id="Lead0001MechHintDuel"><b data-page-node-id="Lead0001MechHintDuel2">领域对撞</b> 指针进窗口时按 <b data-page-node-id="Lead0001MechHintDuel3">J</b> 对齐（同步 5 次压碎对方领域 / 失误 3 次自己崩）</p>
+        <p data-page-node-id="Lead0002MechHintMaho"><b data-page-node-id="Lead0002MechHintMaho2">魔虚罗落地</b> 弱点窗口 1.6s —— 走近它，普攻会自动改打它（伤害 ×1.5）</p>
       </div>
       <div class="cg-col" data-page-node-id="C53G1Whm0N1rZu31at3VRM">
         <h4 data-page-node-id="A4HwjDNOmQwT24oqoXRUK6">镜头</h4>
@@ -32574,6 +32575,14 @@ html.is-touch .controls-grid { display: none !important; }
     // (dt, snap)                  每帧 HUD
     segment: [],
     // (cb,p0,p1,r,meta)->bool     命中扫掠；true = 这次攻击被本模块吃掉
+    /**
+     * 近战的「副目标」（魔虚罗俯冲落地后的 1.6s 弱点窗口）。
+     * (cb, attack) -> { p:{x,z}, r:number, weak?:boolean } | null
+     *   只改两件事：① 射程门槛（range + r）② 这条扫掠线朝哪指。
+     *   伤害归属**不变**（仍是 attack.target = 宿傩）；副目标自己的结算走 segment 钩子。
+     *   返回 null = 没有副目标，combat.js 的每一步都与模块缺席时逐字一致。
+     */
+    meleeAim: [],
     aim: [],
     // (cb,owner,from,dir,skill)   改写弹道方向
     damageGate: [],
@@ -52959,7 +52968,11 @@ var MAHO = {
   hud: { root: null, bar: null, num: null, adapt: null, warn: null, weak: null, state: null, last: "" },
   hudDirty: true,
   stats: { casts: { slash: 0, lightning: 0, dive: 0, barrage: 0 }, playerHits: 0, dodges: 0, immune: 0, adaptEvents: 0, broken: 0, hint: 0, summons: 0, boltsBlocked: 0, blocks: 0 },
-  hookCalls: { tick: 0, segment: 0, aim: 0, damageGate: 0 },
+  hookCalls: { tick: 0, segment: 0, aim: 0, damageGate: 0, meleeAim: 0 },
+  /** 最近一次「普攻已被掰向魔虚罗」的时刻（performance.now()，HUD 用来点亮目标提示） */
+  aimUntil: 0,
+  /** 探针口径：meleeAim 钩子一共给出过几次副目标 */
+  aimOffered: 0,
   lastHitInfo: null,
   /** 探针开关：覆盖"预判侧移"概率（null = 用难度概率）。只在破坏性自测里用 */
   evadeOverride: null,
@@ -53943,13 +53956,24 @@ function mahoUpdateHud() {
   h.bar.style.transform = "scaleX(" + ratio.toFixed(4) + ")";
   h.num.textContent = Math.round(MAHO.hp) + " / " + MAHO.hpMax + (MAHO.softRage ? "  · 软狂暴" : "");
   if (h.adapt) h.adapt.textContent = "适应 " + MAHO.wheelLit + "/" + MAHO_TUNE.WHEEL_MAX;
-  const st = MAHO.state === "down" ? "落地 —— 弱点窗口" : MAHO.state === "summon" ? "召唤中" : MAHO.state === "broken" ? "已击破" : "悬空 —— 近战够不到，锁定后用术式";
+  /**
+   * 落地窗口的状态字要说清"现在普攻打的是谁" ——
+   * 用户报过「想打魔虚罗打不了」，所以这里必须自报家门：
+   * 瞄准已生效 → 「普攻已锁定魔虚罗」；还没进射程 → 「走近它再普攻」。
+   */
+  const aimingHud = MAHO.weakT > 0 && MAHO.state === "down" && mahoAimActive();
+  const st = MAHO.state === "down"
+    ? (aimingHud ? "落地 —— 弱点窗口 · 普攻已锁定魔虚罗" : "落地 —— 弱点窗口 · 走近它再普攻")
+    : MAHO.state === "summon" ? "召唤中" : MAHO.state === "broken" ? "已击破" : "悬空 —— 近战够不到，锁定后用术式";
   if (h.state.textContent !== st) h.state.textContent = st;
   const w = MAHO.warnText || "";
   if (h.warn.textContent !== w) h.warn.textContent = w;
   const weak = MAHO.weakT > 0 && MAHO.state === "down";
   h.weak.style.display = weak ? "inline-block" : "none";
-  if (weak) h.weak.textContent = "弱点暴露 · 近战可击 " + MAHO.weakT.toFixed(1) + "s";
+  if (weak) {
+    h.weak.textContent = (aimingHud ? "弱点暴露 · 普攻正在打它 " : "弱点暴露 · 走近它普攻 ") + MAHO.weakT.toFixed(1) + "s";
+    h.weak.style.background = aimingHud ? "#7ff0ff" : "#ffd873";
+  }
   const col = MAHO.softRage ? "#ff2b1e" : MAHO.state === "down" ? "#ffd873" : "#ff5a3c";
   h.num.style.color = col;
 }
@@ -54059,6 +54083,15 @@ function mahoDebug() {
     partCount: MAHO.model ? MAHO.model.parts.length : 0,
     hint: MAHO.stats.hint,
     blocks: MAHO.stats.blocks || 0,
+    /** 本轮新增：近战副目标（meleeAim）的生效口径 */
+    aim: { calls: MAHO.hookCalls.meleeAim || 0, offered: MAHO.aimOffered || 0, active: mahoAimActive() },
+    /** 对空弹道（HOOKS.aim）的诊断口径：锁没锁上、最近一次提前量算成了什么 */
+    aimAir: {
+      calls: MAHO.hookCalls.aim || 0,
+      lock: mahoLockOn(),
+      last: MAHO.lastAim ? { skill: MAHO.lastAim.skill, flight: MAHO.lastAim.flight, speed: MAHO.lastAim.speed } : null,
+      point: MAHO.aimPoint ? { x: +MAHO.aimPoint.x.toFixed(2), y: +MAHO.aimPoint.y.toFixed(2), z: +MAHO.aimPoint.z.toFixed(2) } : null
+    },
     probeNear: { samples: MAHO.nearSamples || 0, minLast: MAHO.nearLast, min: MAHO.nearMinSq === undefined ? null : +Math.sqrt(MAHO.nearMinSq).toFixed(2), last: MAHO.nearLast, hitR: MAHO_TUNE.HIT_R[mahoDiff(MAHO.cb || {})] },
     summons: MAHO.stats.summons,
     evadeOverride: MAHO.evadeOverride,
@@ -54376,26 +54409,18 @@ function mahoHitTest(cb, p0, p1, radius, meta) {
       return true;
     }
     /**
-     * 悬浮态的偶发「挡下」。
-     * Lead P0：contract 要求玩家近战打宿傩始终吃 ×0.6，**不能**无条件吃掉攻击。
-     * 所以只有几何上真扫到本体（6.9m 高的胸口命中球）时才按 30% 概率挡下：
-     *   - 明确演出：「挡下」字样 + 金色火花 + 法轮闪光 + 音效
-     *   - 伤害**转记到魔虚罗头上**（它的血条会掉），不是凭空消失
-     * 玩家在宿傩身前地面的常规平A 扫不到那个球 → 永远不会被吃，宿傩照常吃 ×0.6。
+     * 悬浮态**不拦截**玩家的近战 —— 这是 Lead 上一轮的 P0 裁定，必须保持。
+     * 原因（也解释了为什么下面原来那段「挡下」代码是死代码，本轮已删除）：
+     *   · 玩家站地面上，扫掠线高度 ≈1.4m；悬空魔虚罗的胸口命中球在 y≈6.9m
+     *     （AIR_Y 4.5 + mahoBodyCenter 2.4），垂距 5.5m ≫ 命中半径 2.55m
+     *     → wouldHit 恒为假，本来就不可能触发；
+     *   · 而上面的 !weak 分支已经 return false、weak 分支命中即 return true，
+     *     到达这一行时 wouldHit 只会是 false —— 那段 30% 挡下永远跑不到。
+     * 现在的语义更干净：
+     *   落地弱点窗口 → 近战被魔虚罗吃掉并吃 ×1.5 加成（它的血条掉）
+     *   悬空        → 近战照常打宿傩，但伤害吃 MAHO_TUNE.GUARD_GOJO(0.6)（damageGate）
+     * MAHO_TUNE.BLOCK_P / BLOCK_TRANSFER 保留为历史数值，当前无代码引用。
      */
-    if (wouldHit && Math.random() < MAHO_TUNE.BLOCK_P) {
-      if (meta && meta.attack) meta.attack.__mahoHit = true;
-      else MAHO.meleeCd = 0.18;
-      const raw = (meta && meta.dmg) || 0;
-      MAHO.stats.blocks = (MAHO.stats.blocks || 0) + 1;
-      MAHO.shakeT = 0.4;
-      mahoApplyHit(cb, meta, Math.max(1, raw * MAHO_TUNE.BLOCK_TRANSFER), { weak: false });
-      cb.fx.callout({ text: "挡下", sub: "退魔之剑", pos: center.clone().setY(center.y + 0.5), color: C.GOLD, color2: C.WHITE, life: 0.8, size: 1.1, rise: 1 });
-      cb.fx.hitSpark({ pos: center.clone(), color: C.GOLD, color2: C.WHITE, count: 18, size: 0.6, life: 0.35, speed: 11 });
-      cb.audio.play("guard_infinity", { volume: 0.6 });
-      cb.pushEvent({ type: "mahoraga_block", dmg: Math.round(raw * MAHO_TUNE.BLOCK_TRANSFER) });
-      return true;
-    }
     return false;   // 扫到了但没挡下 → 交给宿傩那条既有结算路径（近战对宿傩 ×0.6）
   }
   // 术式：几何命中后才考虑预判侧移
@@ -54514,6 +54539,51 @@ function mahoDamageGate(cb, h, dmg) {
     return dmg * MAHO_TUNE.TRUE_SUKUNA;                              // 击破后保留的高伤害
   }
   return dmg;
+}
+
+/**
+ * HOOKS.meleeAim —— 玩家普攻的「副目标」：俯冲落地后的 1.6s 弱点窗口。
+ * ----------------------------------------------------------------------------
+ * 用户 P0（原话）：「宿傩落地攻击暴露弱点的伤害 …… 玩家普通攻击会自动吸附到宿傩身上，
+ * 想打魔虚罗打不了」。
+ * 根因不在魔虚罗，而在 combat.js 的 tryMelee：射程门槛和扫掠方向都拿 a.target（宿傩）
+ * 算，所以玩家站在落地魔虚罗面前时**整个近战判定根本不会触发**，拳头又永远指向宿傩。
+ * 这个钩子只回答一个问题：「我现在是不是可以被普攻打到？」
+ *
+ * 抢目标的三个条件（缺一不可）：
+ *   ① 处于可近战状态（down / descend 后 0.35s，与 segment 钩子的 weak 判据逐字一致）；
+ *   ② 距离 ≤ 玩家当前招式的射程 + 我的命中球半径；
+ *   ③ 玩家没有在往「远离我」的方向走（移动输入与「玩家→我」夹角 > 110° 才让位）。
+ * 返回 null 时 combat.js 的行为与没有这个模块时完全一样。
+ */
+function mahoMeleeAim(cb, atk) {
+  MAHO.hookCalls.meleeAim++;
+  if (!MAHO.alive || MAHO.state === "broken" || MAHO.state === "summon" || MAHO.state === "off") return null;
+  const weak = MAHO.state === "down" || (MAHO.state === "ascend" && MAHO.t < 0.35);
+  if (!weak) return null;                                   // 悬空：契约要求近战够不到
+  const actor = atk && atk.actor;
+  if (!actor || actor.side !== SIDE.GOJO) return null;      // 只服务玩家的普攻
+  const range = atk.flow ? atk.flow.range : 4;
+  const R = mahoHitR(cb);
+  const d = mahoHorizontalDist(actor.p, MAHO.pos);
+  if (d > range + R) return null;                           // 够不到就不抢
+  const mi = actor.moveIntent;
+  if (mi && d > 1e-3) {
+    const ml = Math.hypot(mi.x, mi.z);
+    if (ml > 0.05) {
+      const dot = (mi.x * (MAHO.pos.x - actor.p.x) + mi.z * (MAHO.pos.z - actor.p.z)) / (ml * d);
+      if (dot < -0.35) return null;                         // 玩家明确往反方向走 → 让位给宿傩
+    }
+  }
+  MAHO.aimOffered++;
+  MAHO.aimUntil = (typeof performance !== "undefined" ? performance.now() : Date.now()) + 250;
+  return { p: { x: MAHO.pos.x, z: MAHO.pos.z }, r: R, weak: true };
+}
+
+/** HUD 用：最近 0.25s 内是否真的把普攻掰到了我身上 */
+function mahoAimActive() {
+  const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+  return now < MAHO.aimUntil;
 }
 
 /** 每帧主循环：触发 → 召唤 → 空中机动 → 技能 → 生存状态 */
@@ -54660,7 +54730,9 @@ function mahoReset(cb) {
   MAHO.poseName = "hover";
   MAHO.poseHold = 0;
   MAHO.stats = { casts: { slash: 0, lightning: 0, dive: 0, barrage: 0 }, playerHits: 0, dodges: 0, immune: 0, adaptEvents: 0, broken: 0, hint: 0, summons: 0, boltsBlocked: 0, blocks: 0 };
-  MAHO.hookCalls = { tick: 0, segment: 0, aim: 0, damageGate: 0 };
+  MAHO.hookCalls = { tick: 0, segment: 0, aim: 0, damageGate: 0, meleeAim: 0 };
+  MAHO.aimUntil = 0;
+  MAHO.aimOffered = 0;
   MAHO.lastHitInfo = null;
   mahoKillWave();
   mahoKillAllBolts();
@@ -54717,6 +54789,7 @@ onHook("combatInit", (cb) => {
 onHook("reset", (cb) => mahoReset(cb));
 onHook("tick", (cb, dt, t) => mahoTick(cb, dt, t));
 onHook("segment", (cb, p0, p1, radius, meta) => mahoHitTest(cb, p0, p1, radius, meta));
+onHook("meleeAim", (cb, atk) => mahoMeleeAim(cb, atk));
 onHook("aim", (cb, owner, from, dir, skill) => mahoAim(cb, owner, from, dir, skill));
 onHook("damageGate", (cb, h, dmg) => mahoDamageGate(cb, h, dmg));
 
@@ -54819,8 +54892,15 @@ var DomainDuelTune = {
   // 新窗口中心与上一次至少差这么多（禁止原地重抽 / 背板）
   TIMEOUT_BAND: 0.35,
   // 12s 超时判胜负的带宽（旧版 0.15）
-  HUD_HOLD: 1.8
+  HUD_HOLD: 1.8,
   // 结算后 HUD 保留时间（让玩家看清结果）
+  /**
+   * 结算面板（整屏大字）保留时间。
+   * 用户原话：「领域对拼输赢好像显示不够明显 不知道是输了还是赢了」——
+   * 根因是 main.js 用 tug 判胜负（同步轴结算时 tug 常停在 0）把胜利播成"被击破"，
+   * 而且只有一条 2.4s 的顶部横幅。现在改成整屏大字 + 分数 + 代价，给足 3s。
+   */
+  RESULT_HOLD: 3
 };
 
 /* 本模块私有工具（同作用域里有很多模块，统一加 duel 前缀避免重名） */
@@ -54842,6 +54922,13 @@ var DomainDuelHud = {
   pips: null,
   flashEl: null,
   styleEl: null,
+  /** 结算面板（整屏大字：领域胜利 / 领域败北 / 两败俱伤） */
+  resEl: null,
+  resTitle: null,
+  resVs: null,
+  resLine: null,
+  resHint: null,
+  resT: 0,
   built: false,
   on: false,
   placeT: 0,
@@ -54904,7 +54991,34 @@ var DomainDuelHud = {
       "html.is-touch #duel-hud .dh-tug{height:4px;margin-top:4px}",
       "html.is-touch #duel-hud .dh-hint{margin-top:3px;font-size:13px;letter-spacing:0}",
       "html.is-touch #duel-hud .dh-title{letter-spacing:.06em}",
-      "html.is-touch #duel-hud .dh-status{font-size:clamp(14px,3.6vmin,18px)}"
+      "html.is-touch #duel-hud .dh-status{font-size:clamp(14px,3.6vmin,18px)}",
+      /* ---- 结算面板：领域对拼的输赢必须一眼看出来 ---- */
+      "#duel-result{position:fixed;inset:0;z-index:41;pointer-events:none;display:flex;flex-direction:column;",
+      "align-items:center;justify-content:center;text-align:center;opacity:0;transition:opacity .18s linear;",
+      "font-family:'Noto Sans JP',system-ui,-apple-system,'Segoe UI',sans-serif}",
+      "#duel-result.on{opacity:1}",
+      "#duel-result .dr-veil{position:absolute;inset:0;",
+      "background:radial-gradient(ellipse at center,rgba(0,0,0,0) 22%,rgba(0,0,0,.5) 72%,rgba(0,0,0,.72) 100%)}",
+      "#duel-result .dr-box{position:relative;padding:14px 34px 18px;border:1px solid rgba(255,255,255,.34);",
+      /* 领域背景本身很亮很花（猩红裂纹 + 电光），结算框必须够不透明才读得清 */
+      "background:linear-gradient(180deg,rgba(4,7,13,.93),rgba(4,7,13,.8))}",
+      "#duel-result .dr-tag{font-size:clamp(13px,3vmin,18px);font-weight:700;letter-spacing:.42em;",
+      "color:#cfe6f5;text-shadow:0 2px 6px #000;margin-bottom:2px}",
+      "#duel-result .dr-title{font-size:clamp(40px,10vmin,86px);font-weight:800;letter-spacing:.2em;",
+      "line-height:1.08;text-shadow:0 0 26px currentColor,0 0 64px currentColor,0 4px 0 #000}",
+      "#duel-result .dr-vs{margin-top:2px;font-size:clamp(15px,3.6vmin,22px);font-weight:700;letter-spacing:.08em;",
+      "color:#fff;text-shadow:0 2px 8px #000}",
+      "#duel-result .dr-line{margin-top:4px;font-size:clamp(14px,3.4vmin,20px);color:#dfeaf6;text-shadow:0 2px 6px #000}",
+      "#duel-result .dr-hint{margin-top:6px;font-size:clamp(13px,3vmin,17px);color:#9fd8ee;letter-spacing:.06em;",
+      "text-shadow:0 2px 6px #000}",
+      "#duel-result.win .dr-title{color:#7ff0ff}",
+      "#duel-result.win .dr-box{border-color:rgba(127,240,255,.8);box-shadow:0 0 46px rgba(90,220,255,.5)}",
+      "#duel-result.lose .dr-title{color:#ff5340}",
+      "#duel-result.lose .dr-box{border-color:rgba(255,90,70,.85);box-shadow:0 0 46px rgba(255,50,30,.5)}",
+      "#duel-result.draw .dr-title{color:#c9a6ff}",
+      "#duel-result.draw .dr-box{border-color:rgba(200,160,255,.8);box-shadow:0 0 46px rgba(170,120,255,.5)}",
+      "html.is-touch #duel-result .dr-title{font-size:clamp(30px,8.4vmin,58px);letter-spacing:.14em}",
+      "html.is-touch #duel-result .dr-box{padding:10px 16px 12px}"
     ].join("");
     (document.head || document.documentElement).appendChild(st);
     this.styleEl = st;
@@ -54941,6 +55055,77 @@ var DomainDuelHud = {
     fl.id = "duel-flash";
     document.body.appendChild(fl);
     this.flashEl = fl;
+
+    /* ---- 结算面板：单独一块 DOM，和同步轴 HUD 的显隐互不干扰 ---- */
+    var res = document.createElement("div");
+    res.id = "duel-result";
+    res.style.display = "none";
+    res.innerHTML =
+      '<div class="dr-veil"></div>' +
+      '<div class="dr-box">' +
+      '<div class="dr-tag">領 域 対 決</div>' +
+      '<div class="dr-title"></div>' +
+      '<div class="dr-vs"></div>' +
+      '<div class="dr-line"></div>' +
+      '<div class="dr-hint"></div>' +
+      "</div>";
+    document.body.appendChild(res);
+    this.resEl = res;
+    this.resTitle = res.querySelector(".dr-title");
+    this.resVs = res.querySelector(".dr-vs");
+    this.resLine = res.querySelector(".dr-line");
+    this.resHint = res.querySelector(".dr-hint");
+  },
+  /** 结算面板：整屏大字 + 分数 + 代价。3s 后自动收（TUNE.RESULT_HOLD） */
+  result: function (info) {
+    if (!this.built) this.build();
+    if (!this.resEl) return;
+    var kind = info.kind === "win" ? "win" : info.kind === "lose" ? "lose" : "draw";
+    var title = kind === "win" ? "领域胜利" : kind === "lose" ? "领域败北" : "两败俱伤";
+    this.resTitle.textContent = title;
+    this.resVs.textContent = kind === "draw"
+      ? "双方领域同时崩坏 · 用时 " + info.elapsed.toFixed(1) + "s"
+      : (kind === "win" ? "你 Ⅴ 宿傩" : "宿傩 Ⅴ 你") +
+        " · 同步 " + info.sync + "/" + DomainDuelTune.SYNC_TO_WIN +
+        " · 失误 " + Math.min(info.miss, DomainDuelTune.MISS_TO_LOSE) + "/" + DomainDuelTune.MISS_TO_LOSE +
+        " · 用时 " + info.elapsed.toFixed(1) + "s" + (info.byTime ? "（12s 判定）" : "");
+    this.resLine.textContent = kind === "draw"
+      ? "双方术式熔断 " + info.burnout.toFixed(1) + "s · 各 −" + info.dmg + " HP"
+      : (kind === "win" ? "伏魔御厨子 破碎" : "无量空处 碎裂") +
+        " — " + (kind === "win" ? "宿傩" : "你") + " −" + info.dmg + " HP · 术式熔断 " + info.burnout.toFixed(1) + "s";
+    this.resHint.textContent = kind === "win"
+      ? "同步 " + DomainDuelTune.SYNC_TO_WIN + " 次就能压碎对手领域"
+      : kind === "lose"
+        ? "指针进亮窗再按 J / K —— 失误 " + DomainDuelTune.MISS_TO_LOSE + " 次领域就崩"
+        : "两边都没压住 —— 谁都别想赢";
+    this.resEl.className = kind + " on";
+    this.resEl.style.display = "";
+    this.resT = DomainDuelTune.RESULT_HOLD;
+    /**
+     * 触屏档：结算大字会压住左下角的教学提示条（实测重叠 3572 px²，
+     * 「拖动画面转视角 · 双指捏合缩放」被切一半）。把提示条临时收起来，
+     * 面板收掉时再还原 —— 不永久吞掉玩家的教学提示。
+     */
+    try {
+      var tip = document.querySelector(".t-tip.t-show");
+      if (tip) { this._tipHeld = tip; tip.classList.remove("t-show"); }
+    } catch (e) { /* 忽略 */ }
+    /**
+     * 结算瞬间把同步轴面板收掉。
+     * 不然它会和整屏大字叠在一起（实测截图里白色轴条正好压在结算框下沿，
+     * 屏幕中下方同时有三套字：大字标题、轴面板、提示行）。
+     */
+    this.hide();
+  },
+  clearResult: function () {
+    this.resT = 0;
+    if (this._tipHeld) {
+      try { this._tipHeld.classList.add("t-show"); } catch (e) { /* 忽略 */ }
+      this._tipHeld = null;
+    }
+    if (!this.resEl) return;
+    this.resEl.className = "";
+    this.resEl.style.display = "none";
   },
   show: function () {
     if (!this.built) this.build();
@@ -55012,6 +55197,30 @@ var DomainDuelHud = {
   },
   /** 每帧：读 duel 的自报状态刷 DOM（只在值变化时写） */
   tick: function (dt, duel) {
+    /**
+     * 结算面板独立计时：对拼结束后同步轴 HUD 会收起来，但胜负大字必须留住，
+     * 所以它不跟着 duel.active 走，而是自己数 TUNE.RESULT_HOLD 秒。
+     */
+    /**
+     * 结算面板在「离开战斗」的瞬间必须收掉（独立验证 A9/A11/A12）：
+     *   · reset() 清不掉面板 → 新一局开局大字还挂在屏幕上
+     *   · 保留期内点「返回标题」→ 面板 z-index 41 > 标题页 40，盖住模式选择按钮
+     *   · 点「重新开始」→ 播片阶段面板还挂着
+     * 所以这里跟同步轴 HUD 用同一套 state 过滤。
+     */
+    if (typeof state !== "undefined" && (state === "title" || state === "loading" || state === "cutscene")) {
+      if (this.resT > 0) this.clearResult();
+    }
+    if (this.resT > 0) {
+      this.resT = Math.max(0, this.resT - Math.max(0, dt || 0));
+      if (this.resT <= 0) this.clearResult();
+      /**
+       * 结算大字在的时候**完全不要碰**同步轴 HUD：
+       * 主循环那边 _hudHold(1.8s) 还没过期，每帧都会调 show() 把面板又拉回来，
+       * 于是结算框和三套文字叠在一起（截图里白色轴条就压在结算框下沿）。
+       */
+      return;
+    }
     if (!duel || (!duel.active && !(duel._hudHold > 0))) {
       this.hide();
       return;
@@ -55167,6 +55376,8 @@ var DomainDuel = class {
 
   reset() {
     this.active = false;
+    // 结算大字也要跟着清（独立验证 A9：reset 后面板仍 cls="win on" 挂在屏幕上）
+    if (typeof DomainDuelHud !== "undefined" && DomainDuelHud) DomainDuelHud.clearResult();
     this.tug = 0;
     this.life = 0;
     this.elapsed = 0;
@@ -55238,6 +55449,7 @@ var DomainDuel = class {
       screenAnchor: false
     });
     cb.pushEvent({ type: "duel_begin" });
+    DomainDuelHud.clearResult();   // 上一局的胜负大字先收掉，别压在新对局上
     DomainDuelHud.show();
   }
 
@@ -55656,6 +55868,26 @@ var DomainDuel = class {
         size: 1.4
       });
     }
+    /**
+     * 整屏结算面板（用户：「领域对拼输赢好像显示不够明显 不知道是输了还是赢了」）。
+     * 分数、代价、下一步怎么按全写在同一屏上，不靠一条 2.4s 的顶部横幅。
+     */
+    try {
+      const winSide = winner === SIDE.GOJO ? SIDE.GOJO : winner === SIDE.SUKUNA ? SIDE.SUKUNA : null;
+      DomainDuelHud.result({
+        kind: winSide === SIDE.GOJO ? "win" : winSide === SIDE.SUKUNA ? "lose" : "draw",
+        byTime: timeUp,
+        sync: this.sync,
+        miss: this.miss,
+        elapsed: this.elapsed,
+        dmg: winSide
+          ? Math.round(TUNE.CLASH_WIN_DMG[winSide] * TUNE.INCOMING_SCALE)
+          : Math.round(90 * TUNE.INCOMING_SCALE),
+        burnout: winSide ? TUNE.BURNOUT[loserSide] : TUNE.DRAW_BURNOUT
+      });
+    } catch (e) {
+      console.warn("[duel] 结算面板失败:", e);
+    }
     cb.domains.onClashResolved(winner || null);
   }
 
@@ -55726,6 +55958,7 @@ onHook("clash", createDomainDuel);
 onHook("reset", function () {
   if (DomainDuelCurrent) DomainDuelCurrent.reset();
   DomainDuelHud.hide();
+  DomainDuelHud.clearResult();   // 结算大字也必须清掉（独立验证 A9：reset 后面板还挂着）
 });
 
 /**
@@ -57822,6 +58055,8 @@ var BlackFlash = (function () {
   var _sb = new Vector3();
   var _sc = new Vector3();
   var _sd = new Vector3();
+  /** 近战副目标（魔虚罗落地弱点窗口）的瞄准方向 */
+  var _saim = new Vector3();
   var HitResolver = class {
     constructor(combat2) {
       this.combat = combat2;
@@ -57839,13 +58074,31 @@ var BlackFlash = (function () {
       const rr2 = radius + CAPSULE_R;
       return segSegDistSq(from, to, _sa, _sb) <= rr2 * rr2;
     }
-    /** 出招小步前冲（打击感） */
+    /**
+     * 出招小步前冲（打击感）。
+     * ⚠ 方向必须和 tryMelee 的扫掠方向一致：机制模块给出「近战副目标」
+     * （魔虚罗落地弱点窗口，HOOKS.meleeAim）时朝它冲，没有副目标才朝 a.target（宿傩）。
+     *
+     * 原来这里只认 a.target —— 玩家对着落地魔虚罗按 J，人却被**朝宿傩**的方向拉了 2.6m，
+     * 而命中判定在第 7 帧、副目标射程门槛只有 range+hitR=6m，
+     * 于是「开拳瞬间间距 > 3.4m 的这一拳必然打空」。
+     * 独立验证（reviews/16-verification-r5.md §B）逐帧实测：朝魔虚罗出拳
+     * 位移 projMaho = −2.6m（反方向飞）—— 这才是用户报的
+     * 「玩家普通攻击会自动吸附到宿傩身上，想打魔虚罗打不了」的真身。
+     */
     lunge(a, dist) {
-      const t = a.target;
-      if (!t) return;
+      if (!a || !a.actor || a.actor.dead) return;
+      const alt = a.flow ? firstHook("meleeAim", this.combat, a) : null;
+      /**
+       * ⚠ 两个来源的坐标形状不一样，必须归一化：
+       *   a.target 是 Combatant（坐标在 .p）
+       *   alt.p 是钩子直接给的 {x,z}（魔虚罗不在 fighters 表里，没有 Combatant）
+       */
+      const dst = (alt && alt.p) ? alt.p : (a.target ? a.target.p : null);
+      if (!dst) return;
       const p = a.actor.ctrl.getPos();
-      const dx = t.p.x - p.x;
-      const dz = t.p.z - p.z;
+      const dx = dst.x - p.x;
+      const dz = dst.z - p.z;
       const d = Math.hypot(dx, dz);
       if (d < 1e-4) return;
       const step = Math.min(dist, Math.max(0, d - 1.7));
@@ -57864,26 +58117,62 @@ var BlackFlash = (function () {
       const cb = this.combat;
       const target = a.target;
       if (!target || target.dead) return false;
-      if (a.hitIds.has(target.side)) return false;
       const range = a.flow.range;
-      if (distXZ(a.actor.p, target.p) > range) return false;
       const hand = a.actor.ctrl.handR;
       if (!hand) return false;
-      hand.getWorldPosition(_sc);
-      _sd.copy(_sc).addScaledVector(a.forward, range * 0.85);
       /**
-       * 机制模块的命中扫掠（魔虚罗悬空时近战够不到、俯冲落地才吃判定）。
-       * 用 clone 传出去：钩子内部大概率会调 cb.resolver.apply，而 _sc/_sd 是模块级临时变量。
+       * 机制模块的**近战副目标**（魔虚罗俯冲落地后的 1.6s 弱点窗口，契约见 HOOKS.meleeAim）。
+       * 它只改两件事：
+       *   ① 射程门槛 —— 原来「离宿傩 > range 就直接 return」会让玩家站在落地魔虚罗面前
+       *      **一个判定都打不出来**（用户报的「想打魔虚罗打不了」就是这个）；
+       *   ② 这条扫掠线朝哪指 —— 原来永远指向宿傩，拳头看起来像被他"吸附"过去。
+       * 伤害归属**不变**（仍是 a.target = 宿傩）；魔虚罗那边由 segment 钩子自己结算。
+       * 模块缺席时 alt 恒为 null，下面的每一步都与改前逐字一致。
        */
+      const alt = firstHook("meleeAim", cb, a);
+      const mainIn = !a.hitIds.has(target.side) && distXZ(a.actor.p, target.p) <= range;
+      const altIn = !!alt && !!alt.p && distXZ(a.actor.p, alt.p) <= range + (alt.r || 0);
+      hand.getWorldPosition(_sc);
+      if (!mainIn && !altIn) {
+        /**
+         * 两个目标都够不到：本来这里是直接 return false。
+         * 但那样一来"玩家对着悬空的魔虚罗挥空拳"就得不到任何解释 ——
+         * 悬空提示横幅（mahoraga.js 的 mahoHitTest）也在这条 segment 调用里。
+         * 所以空挥也问一次：钩子内部自己按 9m 距离 + 5s 限流决定要不要提示。
+         */
+        _sd.copy(_sc).addScaledVector(a.forward, range * 0.85);
+        return runHook("segment", cb, _sc.clone(), _sd.clone(), a.flow.hitR, {
+          skill: a.skill, owner: a.actor, kind: "melee", dmg: a.flow.dmg * a.dmgMul, attack: a
+        });
+      }
+      const sweepLen = range * 0.85;
+      let hitAny = false;
+      // ---- ① 副目标：扫掠线掰向它，长度至少够到它的命中球 ----
+      if (altIn) {
+        _saim.set(alt.p.x - a.actor.p.x, 0, alt.p.z - a.actor.p.z);
+        const ad = _saim.length();
+        if (ad > 1e-6) _saim.multiplyScalar(1 / ad);
+        else _saim.copy(a.forward);
+        _sd.copy(_sc).addScaledVector(_saim, Math.max(sweepLen, ad + (alt.r || 0) * 0.6));
+        if (runHook("segment", cb, _sc.clone(), _sd.clone(), a.flow.hitR, {
+          skill: a.skill, owner: a.actor, kind: "melee", dmg: a.flow.dmg * a.dmgMul, attack: a
+        })) {
+          a.hitLanded = true;
+          hitAny = true;
+        }
+      }
+      // ---- ② 原目标（宿傩）：几何与改前逐字一致（含"悬空时给横幅解释"的副作用）----
+      _sd.copy(_sc).addScaledVector(a.forward, sweepLen);
       if (runHook("segment", cb, _sc.clone(), _sd.clone(), a.flow.hitR, {
         skill: a.skill, owner: a.actor, kind: "melee", dmg: a.flow.dmg * a.dmgMul, attack: a
       })) {
         a.hitLanded = true;
-        return true;
+        hitAny = true;
       }
+      if (!mainIn) return hitAny;
       this.capsule(target, _sa, _sb);
       const rr2 = a.flow.hitR + CAPSULE_R;
-      if (segSegDistSq(_sc, _sd, _sa, _sb) > rr2 * rr2) return false;
+      if (segSegDistSq(_sc, _sd, _sa, _sb) > rr2 * rr2) return hitAny;
       const landed = this.apply({
         from: a.actor,
         to: target,
@@ -57907,8 +58196,9 @@ var BlackFlash = (function () {
       if (landed) {
         a.hitIds.add(target.side);
         a.hitLanded = true;
+        hitAny = true;
       }
-      return landed;
+      return hitAny;
     }
     /**
      * 统一的伤害入口。
@@ -59157,7 +59447,17 @@ var BlackFlash = (function () {
         pl.moveIntent.set(0, 0, 0);
       }
       const a = pl.action;
-      if (inp.lockOn || a && !a.done) pl.ctrl.faceTo(foe.p.x, foe.p.z);
+      /**
+       * 出招期间的朝向：默认锁宿傩，但**近战副目标**（落地弱点窗口的魔虚罗）优先 ——
+       * 否则会出现「拳头朝魔虚罗飞出去、人却扭头看着宿傩」的错位。
+       * 副目标的判定规则见 mahoraga.js 的 mahoMeleeAim（只有落地窗口 + 够得着才抢）。
+       */
+      let aimX = foe.p.x, aimZ = foe.p.z;
+      if (a && !a.done) {
+        const altAim = firstHook("meleeAim", cb, a);
+        if (altAim && altAim.p) { aimX = altAim.p.x; aimZ = altAim.p.z; }
+      }
+      if (inp.lockOn || a && !a.done) pl.ctrl.faceTo(aimX, aimZ);
       else if (mag > 0.08) pl.ctrl.faceTo(pl.p.x + mx, pl.p.z + mz);
       if (edges.blue && pl.canCast(SKILL.BLUE)) cb.runner.start(SIDE.GOJO, SKILL.BLUE);
       if (edges.red && pl.canCast(SKILL.RED)) cb.runner.start(SIDE.GOJO, SKILL.RED);
@@ -59330,6 +59630,14 @@ var BlackFlash = (function () {
       sukuna: null,
       tug: 0,
       clashActive: false,
+      /**
+       * 领域对拼的**权威胜负**（'gojo' | 'sukuna' | 'draw' | null）。
+       * 为什么不能只看 tug：机制模块的「术式同步」是 5 次同步判胜 / 3 次失误判负，
+       * 结算那一刻 tug 常常停在 0 附近 —— main.js 用 snap.tug > 0 判胜负时，
+       * 会把玩家的胜利播成「无量空处 被击破 —— 术式熔断」（用户报的"不知道是输是赢"）。
+       * null = 本局还没结算过。
+       */
+      clashWinner: null,
       gojoDomain: null,
       sukunaDomain: null,
       combo: 0,
@@ -59373,6 +59681,7 @@ var BlackFlash = (function () {
       copyState(snap.sukuna, sukuna2.state, sk.burnoutT);
       snap.tug = cb.domains.clash.tug;
       snap.clashActive = cb.domains.clash.active;
+      snap.clashWinner = cb.domains.clash.winner != null ? cb.domains.clash.winner : null;
       snap.gojoDomain = cb.domains.kindOf(SIDE.GOJO);
       snap.sukunaDomain = cb.domains.kindOf(SIDE.SUKUNA);
       snap.combo = cb.combo;
@@ -62508,11 +62817,24 @@ void main() {
       state = "fight";
       ui.hud?.classList.remove("cinema");
       audio.loop("music_battle", { fadeIn: 1 });
-      const won = snap.tug > 0;
-      if (won) stats2.clashWins++;
-      render.impulse({ flash: 0.9, color: won ? C.CYAN : C.CRIMSON, shake: 2, chroma: 2.4, radialBlur: 0.5 });
+      /**
+       * ⚠ 胜负必须用**权威结果**（snap.clashWinner），不能用 snap.tug。
+       * 机制模块的「术式同步」是 5 次同步判胜 / 3 次失误判负，结算那一刻 tug 常常停在
+       * 0 附近 —— 原来用 won = snap.tug > 0 时，玩家的胜利会被播成
+       * 「无量空处 被击破 —— 术式熔断」（用户报的"不知道是输了还是赢了"的根因）。
+       * 只有模块缺席（clashWinner 为 null）的旧实现才回落到 tug。
+       */
+      const verdict = snap.clashWinner;
+      const won = verdict != null ? verdict === "gojo" : snap.tug > 0;
+      const lost = verdict != null ? verdict === "sukuna" : snap.tug <= 0;
+      render.impulse({ flash: 0.9, color: won ? C.CYAN : lost ? C.CRIMSON : C.VIOLET, shake: 2, chroma: 2.4, radialBlur: 0.5 });
       slowmo = 1.3;
-      banner(won ? "无量空处 压倒 伏魔御厨子" : "无量空处 被击破 —— 术式熔断", 2.8);
+      /**
+       * 播报口径与整屏结算面板一致（domainduel.js 的 #duel-result）。
+       * stats2.clashWins 由 clash_win 事件统一 +1，这里不再重复计数
+       * （原来两处都加，赢一次 +2）。
+       */
+      banner(won ? "领域胜利 — 无量空处 压倒 伏魔御厨子" : lost ? "领域败北 — 无量空处 碎裂，术式熔断" : "领域同时崩坏 — 术式熔断", 2.8);
     }
     const domChanged = snap.gojoDomain !== lastDomain.gojo || snap.sukunaDomain !== lastDomain.sukuna;
     if (domChanged) {

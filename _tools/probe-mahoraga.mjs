@@ -591,7 +591,13 @@ try {
       await b.evaluate('window.__M.put("sukuna", ' + p.x + ', ' + (p.z + 26) + ')');   // 与玩家(z+12)相距 14m
       await b.evaluate('window.__M.put("gojo", ' + p.x + ', ' + (p.z + 12) + ')');
       await b.evaluate('window.__M.ready()');
-      await nap(320);   // 同上：等 handR 世界坐标刷新
+      /**
+       * ⚠ 台架修正（本轮）：宿傩被瞬移到 26m 外之后，魔虚罗**不在**新航线上，
+       * 而 mahoAim → mahoPredict 是按「绕宿傩的弧线」外推的（ORBIT_LOCAL 4.5m @10~12m/s），
+       * 于是瞄点被算到反方向、弹道全空 —— 实测 aimPoint z=-9.4 而本体在 z=+14。
+       * 所以必须先等它飞回航线再开炮，否则 F1/F2/P1/P2 测的是台架而不是产品。
+       */
+      await nap(3400);   // 等 handR 刷新 + 魔虚罗飞回新航线
       await b.evaluate('window.__M.lock(true)');
       await b.evaluate('window.__M.evade(0)');
       const d0 = await b.evaluate('window.__M.d()');
@@ -775,6 +781,7 @@ try {
         await b.evaluate('window.__M.put("sukuna", ' + p.x + ', ' + (p.z + 26) + ')');   // 距玩家 14m
         await b.evaluate('window.__M.put("gojo", ' + p.x + ', ' + (p.z + 12) + ')');
         await b.evaluate('window.__M.ready()');
+        await nap(2600);   // 同上：等魔虚罗飞回"绕新宿傩位置"的航线，否则瞄点是错的
         await b.evaluate('window.__M.lock(true)');
         await b.evaluate('window.__M.evade(' + ev + ')');
         const d0 = await b.evaluate('window.__M.d()');

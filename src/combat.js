@@ -1254,6 +1254,8 @@
   var _sb = new Vector3();
   var _sc = new Vector3();
   var _sd = new Vector3();
+  /** 近战副目标（魔虚罗落地弱点窗口）的瞄准方向 */
+  var _saim = new Vector3();
   var HitResolver = class {
     constructor(combat2) {
       this.combat = combat2;
@@ -1271,13 +1273,31 @@
       const rr2 = radius + CAPSULE_R;
       return segSegDistSq(from, to, _sa, _sb) <= rr2 * rr2;
     }
-    /** 出招小步前冲（打击感） */
+    /**
+     * 出招小步前冲（打击感）。
+     * ⚠ 方向必须和 tryMelee 的扫掠方向一致：机制模块给出「近战副目标」
+     * （魔虚罗落地弱点窗口，HOOKS.meleeAim）时朝它冲，没有副目标才朝 a.target（宿傩）。
+     *
+     * 原来这里只认 a.target —— 玩家对着落地魔虚罗按 J，人却被**朝宿傩**的方向拉了 2.6m，
+     * 而命中判定在第 7 帧、副目标射程门槛只有 range+hitR=6m，
+     * 于是「开拳瞬间间距 > 3.4m 的这一拳必然打空」。
+     * 独立验证（reviews/16-verification-r5.md §B）逐帧实测：朝魔虚罗出拳
+     * 位移 projMaho = −2.6m（反方向飞）—— 这才是用户报的
+     * 「玩家普通攻击会自动吸附到宿傩身上，想打魔虚罗打不了」的真身。
+     */
     lunge(a, dist) {
-      const t = a.target;
-      if (!t) return;
+      if (!a || !a.actor || a.actor.dead) return;
+      const alt = a.flow ? firstHook("meleeAim", this.combat, a) : null;
+      /**
+       * ⚠ 两个来源的坐标形状不一样，必须归一化：
+       *   a.target 是 Combatant（坐标在 .p）
+       *   alt.p 是钩子直接给的 {x,z}（魔虚罗不在 fighters 表里，没有 Combatant）
+       */
+      const dst = (alt && alt.p) ? alt.p : (a.target ? a.target.p : null);
+      if (!dst) return;
       const p = a.actor.ctrl.getPos();
-      const dx = t.p.x - p.x;
-      const dz = t.p.z - p.z;
+      const dx = dst.x - p.x;
+      const dz = dst.z - p.z;
       const d = Math.hypot(dx, dz);
       if (d < 1e-4) return;
       const step = Math.min(dist, Math.max(0, d - 1.7));
@@ -1296,26 +1316,62 @@
       const cb = this.combat;
       const target = a.target;
       if (!target || target.dead) return false;
-      if (a.hitIds.has(target.side)) return false;
       const range = a.flow.range;
-      if (distXZ(a.actor.p, target.p) > range) return false;
       const hand = a.actor.ctrl.handR;
       if (!hand) return false;
-      hand.getWorldPosition(_sc);
-      _sd.copy(_sc).addScaledVector(a.forward, range * 0.85);
       /**
-       * 机制模块的命中扫掠（魔虚罗悬空时近战够不到、俯冲落地才吃判定）。
-       * 用 clone 传出去：钩子内部大概率会调 cb.resolver.apply，而 _sc/_sd 是模块级临时变量。
+       * 机制模块的**近战副目标**（魔虚罗俯冲落地后的 1.6s 弱点窗口，契约见 HOOKS.meleeAim）。
+       * 它只改两件事：
+       *   ① 射程门槛 —— 原来「离宿傩 > range 就直接 return」会让玩家站在落地魔虚罗面前
+       *      **一个判定都打不出来**（用户报的「想打魔虚罗打不了」就是这个）；
+       *   ② 这条扫掠线朝哪指 —— 原来永远指向宿傩，拳头看起来像被他"吸附"过去。
+       * 伤害归属**不变**（仍是 a.target = 宿傩）；魔虚罗那边由 segment 钩子自己结算。
+       * 模块缺席时 alt 恒为 null，下面的每一步都与改前逐字一致。
        */
+      const alt = firstHook("meleeAim", cb, a);
+      const mainIn = !a.hitIds.has(target.side) && distXZ(a.actor.p, target.p) <= range;
+      const altIn = !!alt && !!alt.p && distXZ(a.actor.p, alt.p) <= range + (alt.r || 0);
+      hand.getWorldPosition(_sc);
+      if (!mainIn && !altIn) {
+        /**
+         * 两个目标都够不到：本来这里是直接 return false。
+         * 但那样一来"玩家对着悬空的魔虚罗挥空拳"就得不到任何解释 ——
+         * 悬空提示横幅（mahoraga.js 的 mahoHitTest）也在这条 segment 调用里。
+         * 所以空挥也问一次：钩子内部自己按 9m 距离 + 5s 限流决定要不要提示。
+         */
+        _sd.copy(_sc).addScaledVector(a.forward, range * 0.85);
+        return runHook("segment", cb, _sc.clone(), _sd.clone(), a.flow.hitR, {
+          skill: a.skill, owner: a.actor, kind: "melee", dmg: a.flow.dmg * a.dmgMul, attack: a
+        });
+      }
+      const sweepLen = range * 0.85;
+      let hitAny = false;
+      // ---- ① 副目标：扫掠线掰向它，长度至少够到它的命中球 ----
+      if (altIn) {
+        _saim.set(alt.p.x - a.actor.p.x, 0, alt.p.z - a.actor.p.z);
+        const ad = _saim.length();
+        if (ad > 1e-6) _saim.multiplyScalar(1 / ad);
+        else _saim.copy(a.forward);
+        _sd.copy(_sc).addScaledVector(_saim, Math.max(sweepLen, ad + (alt.r || 0) * 0.6));
+        if (runHook("segment", cb, _sc.clone(), _sd.clone(), a.flow.hitR, {
+          skill: a.skill, owner: a.actor, kind: "melee", dmg: a.flow.dmg * a.dmgMul, attack: a
+        })) {
+          a.hitLanded = true;
+          hitAny = true;
+        }
+      }
+      // ---- ② 原目标（宿傩）：几何与改前逐字一致（含"悬空时给横幅解释"的副作用）----
+      _sd.copy(_sc).addScaledVector(a.forward, sweepLen);
       if (runHook("segment", cb, _sc.clone(), _sd.clone(), a.flow.hitR, {
         skill: a.skill, owner: a.actor, kind: "melee", dmg: a.flow.dmg * a.dmgMul, attack: a
       })) {
         a.hitLanded = true;
-        return true;
+        hitAny = true;
       }
+      if (!mainIn) return hitAny;
       this.capsule(target, _sa, _sb);
       const rr2 = a.flow.hitR + CAPSULE_R;
-      if (segSegDistSq(_sc, _sd, _sa, _sb) > rr2 * rr2) return false;
+      if (segSegDistSq(_sc, _sd, _sa, _sb) > rr2 * rr2) return hitAny;
       const landed = this.apply({
         from: a.actor,
         to: target,
@@ -1339,8 +1395,9 @@
       if (landed) {
         a.hitIds.add(target.side);
         a.hitLanded = true;
+        hitAny = true;
       }
-      return landed;
+      return hitAny;
     }
     /**
      * 统一的伤害入口。
@@ -2589,7 +2646,17 @@
         pl.moveIntent.set(0, 0, 0);
       }
       const a = pl.action;
-      if (inp.lockOn || a && !a.done) pl.ctrl.faceTo(foe.p.x, foe.p.z);
+      /**
+       * 出招期间的朝向：默认锁宿傩，但**近战副目标**（落地弱点窗口的魔虚罗）优先 ——
+       * 否则会出现「拳头朝魔虚罗飞出去、人却扭头看着宿傩」的错位。
+       * 副目标的判定规则见 mahoraga.js 的 mahoMeleeAim（只有落地窗口 + 够得着才抢）。
+       */
+      let aimX = foe.p.x, aimZ = foe.p.z;
+      if (a && !a.done) {
+        const altAim = firstHook("meleeAim", cb, a);
+        if (altAim && altAim.p) { aimX = altAim.p.x; aimZ = altAim.p.z; }
+      }
+      if (inp.lockOn || a && !a.done) pl.ctrl.faceTo(aimX, aimZ);
       else if (mag > 0.08) pl.ctrl.faceTo(pl.p.x + mx, pl.p.z + mz);
       if (edges.blue && pl.canCast(SKILL.BLUE)) cb.runner.start(SIDE.GOJO, SKILL.BLUE);
       if (edges.red && pl.canCast(SKILL.RED)) cb.runner.start(SIDE.GOJO, SKILL.RED);
@@ -2762,6 +2829,14 @@
       sukuna: null,
       tug: 0,
       clashActive: false,
+      /**
+       * 领域对拼的**权威胜负**（'gojo' | 'sukuna' | 'draw' | null）。
+       * 为什么不能只看 tug：机制模块的「术式同步」是 5 次同步判胜 / 3 次失误判负，
+       * 结算那一刻 tug 常常停在 0 附近 —— main.js 用 snap.tug > 0 判胜负时，
+       * 会把玩家的胜利播成「无量空处 被击破 —— 术式熔断」（用户报的"不知道是输是赢"）。
+       * null = 本局还没结算过。
+       */
+      clashWinner: null,
       gojoDomain: null,
       sukunaDomain: null,
       combo: 0,
@@ -2805,6 +2880,7 @@
       copyState(snap.sukuna, sukuna2.state, sk.burnoutT);
       snap.tug = cb.domains.clash.tug;
       snap.clashActive = cb.domains.clash.active;
+      snap.clashWinner = cb.domains.clash.winner != null ? cb.domains.clash.winner : null;
       snap.gojoDomain = cb.domains.kindOf(SIDE.GOJO);
       snap.sukunaDomain = cb.domains.kindOf(SIDE.SUKUNA);
       snap.combo = cb.combo;

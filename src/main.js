@@ -1088,11 +1088,24 @@
       state = "fight";
       ui.hud?.classList.remove("cinema");
       audio.loop("music_battle", { fadeIn: 1 });
-      const won = snap.tug > 0;
-      if (won) stats2.clashWins++;
-      render.impulse({ flash: 0.9, color: won ? C.CYAN : C.CRIMSON, shake: 2, chroma: 2.4, radialBlur: 0.5 });
+      /**
+       * ⚠ 胜负必须用**权威结果**（snap.clashWinner），不能用 snap.tug。
+       * 机制模块的「术式同步」是 5 次同步判胜 / 3 次失误判负，结算那一刻 tug 常常停在
+       * 0 附近 —— 原来用 won = snap.tug > 0 时，玩家的胜利会被播成
+       * 「无量空处 被击破 —— 术式熔断」（用户报的"不知道是输了还是赢了"的根因）。
+       * 只有模块缺席（clashWinner 为 null）的旧实现才回落到 tug。
+       */
+      const verdict = snap.clashWinner;
+      const won = verdict != null ? verdict === "gojo" : snap.tug > 0;
+      const lost = verdict != null ? verdict === "sukuna" : snap.tug <= 0;
+      render.impulse({ flash: 0.9, color: won ? C.CYAN : lost ? C.CRIMSON : C.VIOLET, shake: 2, chroma: 2.4, radialBlur: 0.5 });
       slowmo = 1.3;
-      banner(won ? "无量空处 压倒 伏魔御厨子" : "无量空处 被击破 —— 术式熔断", 2.8);
+      /**
+       * 播报口径与整屏结算面板一致（domainduel.js 的 #duel-result）。
+       * stats2.clashWins 由 clash_win 事件统一 +1，这里不再重复计数
+       * （原来两处都加，赢一次 +2）。
+       */
+      banner(won ? "领域胜利 — 无量空处 压倒 伏魔御厨子" : lost ? "领域败北 — 无量空处 碎裂，术式熔断" : "领域同时崩坏 — 术式熔断", 2.8);
     }
     const domChanged = snap.gojoDomain !== lastDomain.gojo || snap.sukunaDomain !== lastDomain.sukuna;
     if (domChanged) {

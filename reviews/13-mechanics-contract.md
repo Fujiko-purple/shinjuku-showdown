@@ -30,6 +30,9 @@ var HOOKS = {
   tick:       [], // (cb, dt, t)               每帧（战斗逻辑之后、快照之前）
   hud:        [], // (dt, snap)                每帧 HUD（hud.js 驱动）
   segment:    [], // (cb,p0,p1,r,meta)->bool   命中扫掠检测；return true = 这次攻击被本模块吃掉
+  meleeAim:   [], // (cb,attack)->{p:{x,z},r,weak?}|null  近战副目标（魔虚罗落地弱点窗口）
+                  //   只改射程门槛（range + r）与这条扫掠线朝哪指；伤害归属仍是 attack.target
+                  //   返回 null = 没有副目标，combat.js 的行为与模块缺席逐字一致
   aim:        [], // (cb,owner,from,dir,skill)->Vector3|null  改写弹道方向（对空）
   damageGate: [], // (cb,h,dmg)->number        伤害乘区（数值链，必须返回数字）
   onHitDone:  [], // (cb,h,dmg,info)           伤害结算完成
@@ -56,6 +59,7 @@ function firstHook(name, ...args) { ... } // 只调第一个
 | `HitResolver.apply(h)` 黑闪判定处 | `blackFlash` | 返回 true = 本次命中算黑闪 |
 | `HitResolver.apply(h)` 结算完 | `onHitDone` | |
 | `tryMelee / 苍 / 赫 / 茈 / 开` 命中检测处 | `segment` | 每个弹道/近战的扫掠段都会问一次 |
+| `tryMelee` 的射程门槛前 + `updatePlayer` 出招朝向 | `meleeAim` | 近战副目标（V2 · 2026-09-12 追加）：把「站在落地魔虚罗面前打不出判定 + 拳头被吸附到宿傩身上」修掉 |
 | `spawnBlueField/spawnRedField/spawnFurnaceField/firePurple` | `aim` | 允许把弹道掰向空中 |
 | `updatePlayer` 移动速度 | `move` | `speedMul` |
 | `Combatant.syncState` | `locomotion` | 移动动画状态机 |
@@ -65,6 +69,17 @@ function firstHook(name, ...args) { ... } // 只调第一个
 | `hud.js` 每帧 | `hud` | |
 | `DomainRunner` 构造 | `clash` | |
 | `camera.js` 常规取景算完后 | `camFrame` | 返回 `{frac,pitch,lookH,fracMin}` 覆盖取景（魔虚罗升空用） |
+
+### 1.1b 快照追加字段（V2 · 2026-09-12）
+
+`getSnapshot()` 多返回一个 `clashWinner`（`'gojo' | 'sukuna' | 'draw' | null`）。
+
+**为什么必须有**：`snap.tug` 只能表达「拉锯条推到哪」，而机制模块的领域对决是
+「5 次同步判胜 / 3 次失误判负」，结算那一刻 tug 常常停在 0 附近 ——
+`main.js` 原来用 `won = snap.tug > 0` 判胜负，会把玩家的胜利播成
+「无量空处 被击破 —— 术式熔断」（用户报的「不知道是输了还是赢了」就是这个）。
+`clashWinner` 是**权威胜负**，两种实现（默认 DomainClash / domainduel.js）都会写 `this.winner`。
+`main.js` 只在 `clashWinner == null`（模块缺席的旧实现）时才回落到 tug。
 
 ### 1.2 combat 提供的公共设施（队友直接用，不要改）
 

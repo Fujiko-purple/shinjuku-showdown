@@ -524,7 +524,11 @@ var MAHO = {
   hud: { root: null, bar: null, num: null, adapt: null, warn: null, weak: null, state: null, last: "" },
   hudDirty: true,
   stats: { casts: { slash: 0, lightning: 0, dive: 0, barrage: 0 }, playerHits: 0, dodges: 0, immune: 0, adaptEvents: 0, broken: 0, hint: 0, summons: 0, boltsBlocked: 0, blocks: 0 },
-  hookCalls: { tick: 0, segment: 0, aim: 0, damageGate: 0 },
+  hookCalls: { tick: 0, segment: 0, aim: 0, damageGate: 0, meleeAim: 0 },
+  /** 最近一次「普攻已被掰向魔虚罗」的时刻（performance.now()，HUD 用来点亮目标提示） */
+  aimUntil: 0,
+  /** 探针口径：meleeAim 钩子一共给出过几次副目标 */
+  aimOffered: 0,
   lastHitInfo: null,
   /** 探针开关：覆盖"预判侧移"概率（null = 用难度概率）。只在破坏性自测里用 */
   evadeOverride: null,
@@ -1508,13 +1512,24 @@ function mahoUpdateHud() {
   h.bar.style.transform = "scaleX(" + ratio.toFixed(4) + ")";
   h.num.textContent = Math.round(MAHO.hp) + " / " + MAHO.hpMax + (MAHO.softRage ? "  · 软狂暴" : "");
   if (h.adapt) h.adapt.textContent = "适应 " + MAHO.wheelLit + "/" + MAHO_TUNE.WHEEL_MAX;
-  const st = MAHO.state === "down" ? "落地 —— 弱点窗口" : MAHO.state === "summon" ? "召唤中" : MAHO.state === "broken" ? "已击破" : "悬空 —— 近战够不到，锁定后用术式";
+  /**
+   * 落地窗口的状态字要说清"现在普攻打的是谁" ——
+   * 用户报过「想打魔虚罗打不了」，所以这里必须自报家门：
+   * 瞄准已生效 → 「普攻已锁定魔虚罗」；还没进射程 → 「走近它再普攻」。
+   */
+  const aimingHud = MAHO.weakT > 0 && MAHO.state === "down" && mahoAimActive();
+  const st = MAHO.state === "down"
+    ? (aimingHud ? "落地 —— 弱点窗口 · 普攻已锁定魔虚罗" : "落地 —— 弱点窗口 · 走近它再普攻")
+    : MAHO.state === "summon" ? "召唤中" : MAHO.state === "broken" ? "已击破" : "悬空 —— 近战够不到，锁定后用术式";
   if (h.state.textContent !== st) h.state.textContent = st;
   const w = MAHO.warnText || "";
   if (h.warn.textContent !== w) h.warn.textContent = w;
   const weak = MAHO.weakT > 0 && MAHO.state === "down";
   h.weak.style.display = weak ? "inline-block" : "none";
-  if (weak) h.weak.textContent = "弱点暴露 · 近战可击 " + MAHO.weakT.toFixed(1) + "s";
+  if (weak) {
+    h.weak.textContent = (aimingHud ? "弱点暴露 · 普攻正在打它 " : "弱点暴露 · 走近它普攻 ") + MAHO.weakT.toFixed(1) + "s";
+    h.weak.style.background = aimingHud ? "#7ff0ff" : "#ffd873";
+  }
   const col = MAHO.softRage ? "#ff2b1e" : MAHO.state === "down" ? "#ffd873" : "#ff5a3c";
   h.num.style.color = col;
 }
@@ -1624,6 +1639,15 @@ function mahoDebug() {
     partCount: MAHO.model ? MAHO.model.parts.length : 0,
     hint: MAHO.stats.hint,
     blocks: MAHO.stats.blocks || 0,
+    /** 本轮新增：近战副目标（meleeAim）的生效口径 */
+    aim: { calls: MAHO.hookCalls.meleeAim || 0, offered: MAHO.aimOffered || 0, active: mahoAimActive() },
+    /** 对空弹道（HOOKS.aim）的诊断口径：锁没锁上、最近一次提前量算成了什么 */
+    aimAir: {
+      calls: MAHO.hookCalls.aim || 0,
+      lock: mahoLockOn(),
+      last: MAHO.lastAim ? { skill: MAHO.lastAim.skill, flight: MAHO.lastAim.flight, speed: MAHO.lastAim.speed } : null,
+      point: MAHO.aimPoint ? { x: +MAHO.aimPoint.x.toFixed(2), y: +MAHO.aimPoint.y.toFixed(2), z: +MAHO.aimPoint.z.toFixed(2) } : null
+    },
     probeNear: { samples: MAHO.nearSamples || 0, minLast: MAHO.nearLast, min: MAHO.nearMinSq === undefined ? null : +Math.sqrt(MAHO.nearMinSq).toFixed(2), last: MAHO.nearLast, hitR: MAHO_TUNE.HIT_R[mahoDiff(MAHO.cb || {})] },
     summons: MAHO.stats.summons,
     evadeOverride: MAHO.evadeOverride,
@@ -1941,26 +1965,18 @@ function mahoHitTest(cb, p0, p1, radius, meta) {
       return true;
     }
     /**
-     * 悬浮态的偶发「挡下」。
-     * Lead P0：contract 要求玩家近战打宿傩始终吃 ×0.6，**不能**无条件吃掉攻击。
-     * 所以只有几何上真扫到本体（6.9m 高的胸口命中球）时才按 30% 概率挡下：
-     *   - 明确演出：「挡下」字样 + 金色火花 + 法轮闪光 + 音效
-     *   - 伤害**转记到魔虚罗头上**（它的血条会掉），不是凭空消失
-     * 玩家在宿傩身前地面的常规平A 扫不到那个球 → 永远不会被吃，宿傩照常吃 ×0.6。
+     * 悬浮态**不拦截**玩家的近战 —— 这是 Lead 上一轮的 P0 裁定，必须保持。
+     * 原因（也解释了为什么下面原来那段「挡下」代码是死代码，本轮已删除）：
+     *   · 玩家站地面上，扫掠线高度 ≈1.4m；悬空魔虚罗的胸口命中球在 y≈6.9m
+     *     （AIR_Y 4.5 + mahoBodyCenter 2.4），垂距 5.5m ≫ 命中半径 2.55m
+     *     → wouldHit 恒为假，本来就不可能触发；
+     *   · 而上面的 !weak 分支已经 return false、weak 分支命中即 return true，
+     *     到达这一行时 wouldHit 只会是 false —— 那段 30% 挡下永远跑不到。
+     * 现在的语义更干净：
+     *   落地弱点窗口 → 近战被魔虚罗吃掉并吃 ×1.5 加成（它的血条掉）
+     *   悬空        → 近战照常打宿傩，但伤害吃 MAHO_TUNE.GUARD_GOJO(0.6)（damageGate）
+     * MAHO_TUNE.BLOCK_P / BLOCK_TRANSFER 保留为历史数值，当前无代码引用。
      */
-    if (wouldHit && Math.random() < MAHO_TUNE.BLOCK_P) {
-      if (meta && meta.attack) meta.attack.__mahoHit = true;
-      else MAHO.meleeCd = 0.18;
-      const raw = (meta && meta.dmg) || 0;
-      MAHO.stats.blocks = (MAHO.stats.blocks || 0) + 1;
-      MAHO.shakeT = 0.4;
-      mahoApplyHit(cb, meta, Math.max(1, raw * MAHO_TUNE.BLOCK_TRANSFER), { weak: false });
-      cb.fx.callout({ text: "挡下", sub: "退魔之剑", pos: center.clone().setY(center.y + 0.5), color: C.GOLD, color2: C.WHITE, life: 0.8, size: 1.1, rise: 1 });
-      cb.fx.hitSpark({ pos: center.clone(), color: C.GOLD, color2: C.WHITE, count: 18, size: 0.6, life: 0.35, speed: 11 });
-      cb.audio.play("guard_infinity", { volume: 0.6 });
-      cb.pushEvent({ type: "mahoraga_block", dmg: Math.round(raw * MAHO_TUNE.BLOCK_TRANSFER) });
-      return true;
-    }
     return false;   // 扫到了但没挡下 → 交给宿傩那条既有结算路径（近战对宿傩 ×0.6）
   }
   // 术式：几何命中后才考虑预判侧移
@@ -2079,6 +2095,51 @@ function mahoDamageGate(cb, h, dmg) {
     return dmg * MAHO_TUNE.TRUE_SUKUNA;                              // 击破后保留的高伤害
   }
   return dmg;
+}
+
+/**
+ * HOOKS.meleeAim —— 玩家普攻的「副目标」：俯冲落地后的 1.6s 弱点窗口。
+ * ----------------------------------------------------------------------------
+ * 用户 P0（原话）：「宿傩落地攻击暴露弱点的伤害 …… 玩家普通攻击会自动吸附到宿傩身上，
+ * 想打魔虚罗打不了」。
+ * 根因不在魔虚罗，而在 combat.js 的 tryMelee：射程门槛和扫掠方向都拿 a.target（宿傩）
+ * 算，所以玩家站在落地魔虚罗面前时**整个近战判定根本不会触发**，拳头又永远指向宿傩。
+ * 这个钩子只回答一个问题：「我现在是不是可以被普攻打到？」
+ *
+ * 抢目标的三个条件（缺一不可）：
+ *   ① 处于可近战状态（down / descend 后 0.35s，与 segment 钩子的 weak 判据逐字一致）；
+ *   ② 距离 ≤ 玩家当前招式的射程 + 我的命中球半径；
+ *   ③ 玩家没有在往「远离我」的方向走（移动输入与「玩家→我」夹角 > 110° 才让位）。
+ * 返回 null 时 combat.js 的行为与没有这个模块时完全一样。
+ */
+function mahoMeleeAim(cb, atk) {
+  MAHO.hookCalls.meleeAim++;
+  if (!MAHO.alive || MAHO.state === "broken" || MAHO.state === "summon" || MAHO.state === "off") return null;
+  const weak = MAHO.state === "down" || (MAHO.state === "ascend" && MAHO.t < 0.35);
+  if (!weak) return null;                                   // 悬空：契约要求近战够不到
+  const actor = atk && atk.actor;
+  if (!actor || actor.side !== SIDE.GOJO) return null;      // 只服务玩家的普攻
+  const range = atk.flow ? atk.flow.range : 4;
+  const R = mahoHitR(cb);
+  const d = mahoHorizontalDist(actor.p, MAHO.pos);
+  if (d > range + R) return null;                           // 够不到就不抢
+  const mi = actor.moveIntent;
+  if (mi && d > 1e-3) {
+    const ml = Math.hypot(mi.x, mi.z);
+    if (ml > 0.05) {
+      const dot = (mi.x * (MAHO.pos.x - actor.p.x) + mi.z * (MAHO.pos.z - actor.p.z)) / (ml * d);
+      if (dot < -0.35) return null;                         // 玩家明确往反方向走 → 让位给宿傩
+    }
+  }
+  MAHO.aimOffered++;
+  MAHO.aimUntil = (typeof performance !== "undefined" ? performance.now() : Date.now()) + 250;
+  return { p: { x: MAHO.pos.x, z: MAHO.pos.z }, r: R, weak: true };
+}
+
+/** HUD 用：最近 0.25s 内是否真的把普攻掰到了我身上 */
+function mahoAimActive() {
+  const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+  return now < MAHO.aimUntil;
 }
 
 /** 每帧主循环：触发 → 召唤 → 空中机动 → 技能 → 生存状态 */
@@ -2225,7 +2286,9 @@ function mahoReset(cb) {
   MAHO.poseName = "hover";
   MAHO.poseHold = 0;
   MAHO.stats = { casts: { slash: 0, lightning: 0, dive: 0, barrage: 0 }, playerHits: 0, dodges: 0, immune: 0, adaptEvents: 0, broken: 0, hint: 0, summons: 0, boltsBlocked: 0, blocks: 0 };
-  MAHO.hookCalls = { tick: 0, segment: 0, aim: 0, damageGate: 0 };
+  MAHO.hookCalls = { tick: 0, segment: 0, aim: 0, damageGate: 0, meleeAim: 0 };
+  MAHO.aimUntil = 0;
+  MAHO.aimOffered = 0;
   MAHO.lastHitInfo = null;
   mahoKillWave();
   mahoKillAllBolts();
@@ -2282,6 +2345,7 @@ onHook("combatInit", (cb) => {
 onHook("reset", (cb) => mahoReset(cb));
 onHook("tick", (cb, dt, t) => mahoTick(cb, dt, t));
 onHook("segment", (cb, p0, p1, radius, meta) => mahoHitTest(cb, p0, p1, radius, meta));
+onHook("meleeAim", (cb, atk) => mahoMeleeAim(cb, atk));
 onHook("aim", (cb, owner, from, dir, skill) => mahoAim(cb, owner, from, dir, skill));
 onHook("damageGate", (cb, h, dmg) => mahoDamageGate(cb, h, dmg));
 

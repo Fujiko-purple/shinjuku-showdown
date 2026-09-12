@@ -85,8 +85,15 @@ var DomainDuelTune = {
   // 新窗口中心与上一次至少差这么多（禁止原地重抽 / 背板）
   TIMEOUT_BAND: 0.35,
   // 12s 超时判胜负的带宽（旧版 0.15）
-  HUD_HOLD: 1.8
+  HUD_HOLD: 1.8,
   // 结算后 HUD 保留时间（让玩家看清结果）
+  /**
+   * 结算面板（整屏大字）保留时间。
+   * 用户原话：「领域对拼输赢好像显示不够明显 不知道是输了还是赢了」——
+   * 根因是 main.js 用 tug 判胜负（同步轴结算时 tug 常停在 0）把胜利播成"被击破"，
+   * 而且只有一条 2.4s 的顶部横幅。现在改成整屏大字 + 分数 + 代价，给足 3s。
+   */
+  RESULT_HOLD: 3
 };
 
 /* 本模块私有工具（同作用域里有很多模块，统一加 duel 前缀避免重名） */
@@ -108,6 +115,13 @@ var DomainDuelHud = {
   pips: null,
   flashEl: null,
   styleEl: null,
+  /** 结算面板（整屏大字：领域胜利 / 领域败北 / 两败俱伤） */
+  resEl: null,
+  resTitle: null,
+  resVs: null,
+  resLine: null,
+  resHint: null,
+  resT: 0,
   built: false,
   on: false,
   placeT: 0,
@@ -170,7 +184,34 @@ var DomainDuelHud = {
       "html.is-touch #duel-hud .dh-tug{height:4px;margin-top:4px}",
       "html.is-touch #duel-hud .dh-hint{margin-top:3px;font-size:13px;letter-spacing:0}",
       "html.is-touch #duel-hud .dh-title{letter-spacing:.06em}",
-      "html.is-touch #duel-hud .dh-status{font-size:clamp(14px,3.6vmin,18px)}"
+      "html.is-touch #duel-hud .dh-status{font-size:clamp(14px,3.6vmin,18px)}",
+      /* ---- 结算面板：领域对拼的输赢必须一眼看出来 ---- */
+      "#duel-result{position:fixed;inset:0;z-index:41;pointer-events:none;display:flex;flex-direction:column;",
+      "align-items:center;justify-content:center;text-align:center;opacity:0;transition:opacity .18s linear;",
+      "font-family:'Noto Sans JP',system-ui,-apple-system,'Segoe UI',sans-serif}",
+      "#duel-result.on{opacity:1}",
+      "#duel-result .dr-veil{position:absolute;inset:0;",
+      "background:radial-gradient(ellipse at center,rgba(0,0,0,0) 22%,rgba(0,0,0,.5) 72%,rgba(0,0,0,.72) 100%)}",
+      "#duel-result .dr-box{position:relative;padding:14px 34px 18px;border:1px solid rgba(255,255,255,.34);",
+      /* 领域背景本身很亮很花（猩红裂纹 + 电光），结算框必须够不透明才读得清 */
+      "background:linear-gradient(180deg,rgba(4,7,13,.93),rgba(4,7,13,.8))}",
+      "#duel-result .dr-tag{font-size:clamp(13px,3vmin,18px);font-weight:700;letter-spacing:.42em;",
+      "color:#cfe6f5;text-shadow:0 2px 6px #000;margin-bottom:2px}",
+      "#duel-result .dr-title{font-size:clamp(40px,10vmin,86px);font-weight:800;letter-spacing:.2em;",
+      "line-height:1.08;text-shadow:0 0 26px currentColor,0 0 64px currentColor,0 4px 0 #000}",
+      "#duel-result .dr-vs{margin-top:2px;font-size:clamp(15px,3.6vmin,22px);font-weight:700;letter-spacing:.08em;",
+      "color:#fff;text-shadow:0 2px 8px #000}",
+      "#duel-result .dr-line{margin-top:4px;font-size:clamp(14px,3.4vmin,20px);color:#dfeaf6;text-shadow:0 2px 6px #000}",
+      "#duel-result .dr-hint{margin-top:6px;font-size:clamp(13px,3vmin,17px);color:#9fd8ee;letter-spacing:.06em;",
+      "text-shadow:0 2px 6px #000}",
+      "#duel-result.win .dr-title{color:#7ff0ff}",
+      "#duel-result.win .dr-box{border-color:rgba(127,240,255,.8);box-shadow:0 0 46px rgba(90,220,255,.5)}",
+      "#duel-result.lose .dr-title{color:#ff5340}",
+      "#duel-result.lose .dr-box{border-color:rgba(255,90,70,.85);box-shadow:0 0 46px rgba(255,50,30,.5)}",
+      "#duel-result.draw .dr-title{color:#c9a6ff}",
+      "#duel-result.draw .dr-box{border-color:rgba(200,160,255,.8);box-shadow:0 0 46px rgba(170,120,255,.5)}",
+      "html.is-touch #duel-result .dr-title{font-size:clamp(30px,8.4vmin,58px);letter-spacing:.14em}",
+      "html.is-touch #duel-result .dr-box{padding:10px 16px 12px}"
     ].join("");
     (document.head || document.documentElement).appendChild(st);
     this.styleEl = st;
@@ -207,6 +248,77 @@ var DomainDuelHud = {
     fl.id = "duel-flash";
     document.body.appendChild(fl);
     this.flashEl = fl;
+
+    /* ---- 结算面板：单独一块 DOM，和同步轴 HUD 的显隐互不干扰 ---- */
+    var res = document.createElement("div");
+    res.id = "duel-result";
+    res.style.display = "none";
+    res.innerHTML =
+      '<div class="dr-veil"></div>' +
+      '<div class="dr-box">' +
+      '<div class="dr-tag">領 域 対 決</div>' +
+      '<div class="dr-title"></div>' +
+      '<div class="dr-vs"></div>' +
+      '<div class="dr-line"></div>' +
+      '<div class="dr-hint"></div>' +
+      "</div>";
+    document.body.appendChild(res);
+    this.resEl = res;
+    this.resTitle = res.querySelector(".dr-title");
+    this.resVs = res.querySelector(".dr-vs");
+    this.resLine = res.querySelector(".dr-line");
+    this.resHint = res.querySelector(".dr-hint");
+  },
+  /** 结算面板：整屏大字 + 分数 + 代价。3s 后自动收（TUNE.RESULT_HOLD） */
+  result: function (info) {
+    if (!this.built) this.build();
+    if (!this.resEl) return;
+    var kind = info.kind === "win" ? "win" : info.kind === "lose" ? "lose" : "draw";
+    var title = kind === "win" ? "领域胜利" : kind === "lose" ? "领域败北" : "两败俱伤";
+    this.resTitle.textContent = title;
+    this.resVs.textContent = kind === "draw"
+      ? "双方领域同时崩坏 · 用时 " + info.elapsed.toFixed(1) + "s"
+      : (kind === "win" ? "你 Ⅴ 宿傩" : "宿傩 Ⅴ 你") +
+        " · 同步 " + info.sync + "/" + DomainDuelTune.SYNC_TO_WIN +
+        " · 失误 " + Math.min(info.miss, DomainDuelTune.MISS_TO_LOSE) + "/" + DomainDuelTune.MISS_TO_LOSE +
+        " · 用时 " + info.elapsed.toFixed(1) + "s" + (info.byTime ? "（12s 判定）" : "");
+    this.resLine.textContent = kind === "draw"
+      ? "双方术式熔断 " + info.burnout.toFixed(1) + "s · 各 −" + info.dmg + " HP"
+      : (kind === "win" ? "伏魔御厨子 破碎" : "无量空处 碎裂") +
+        " — " + (kind === "win" ? "宿傩" : "你") + " −" + info.dmg + " HP · 术式熔断 " + info.burnout.toFixed(1) + "s";
+    this.resHint.textContent = kind === "win"
+      ? "同步 " + DomainDuelTune.SYNC_TO_WIN + " 次就能压碎对手领域"
+      : kind === "lose"
+        ? "指针进亮窗再按 J / K —— 失误 " + DomainDuelTune.MISS_TO_LOSE + " 次领域就崩"
+        : "两边都没压住 —— 谁都别想赢";
+    this.resEl.className = kind + " on";
+    this.resEl.style.display = "";
+    this.resT = DomainDuelTune.RESULT_HOLD;
+    /**
+     * 触屏档：结算大字会压住左下角的教学提示条（实测重叠 3572 px²，
+     * 「拖动画面转视角 · 双指捏合缩放」被切一半）。把提示条临时收起来，
+     * 面板收掉时再还原 —— 不永久吞掉玩家的教学提示。
+     */
+    try {
+      var tip = document.querySelector(".t-tip.t-show");
+      if (tip) { this._tipHeld = tip; tip.classList.remove("t-show"); }
+    } catch (e) { /* 忽略 */ }
+    /**
+     * 结算瞬间把同步轴面板收掉。
+     * 不然它会和整屏大字叠在一起（实测截图里白色轴条正好压在结算框下沿，
+     * 屏幕中下方同时有三套字：大字标题、轴面板、提示行）。
+     */
+    this.hide();
+  },
+  clearResult: function () {
+    this.resT = 0;
+    if (this._tipHeld) {
+      try { this._tipHeld.classList.add("t-show"); } catch (e) { /* 忽略 */ }
+      this._tipHeld = null;
+    }
+    if (!this.resEl) return;
+    this.resEl.className = "";
+    this.resEl.style.display = "none";
   },
   show: function () {
     if (!this.built) this.build();
@@ -278,6 +390,30 @@ var DomainDuelHud = {
   },
   /** 每帧：读 duel 的自报状态刷 DOM（只在值变化时写） */
   tick: function (dt, duel) {
+    /**
+     * 结算面板独立计时：对拼结束后同步轴 HUD 会收起来，但胜负大字必须留住，
+     * 所以它不跟着 duel.active 走，而是自己数 TUNE.RESULT_HOLD 秒。
+     */
+    /**
+     * 结算面板在「离开战斗」的瞬间必须收掉（独立验证 A9/A11/A12）：
+     *   · reset() 清不掉面板 → 新一局开局大字还挂在屏幕上
+     *   · 保留期内点「返回标题」→ 面板 z-index 41 > 标题页 40，盖住模式选择按钮
+     *   · 点「重新开始」→ 播片阶段面板还挂着
+     * 所以这里跟同步轴 HUD 用同一套 state 过滤。
+     */
+    if (typeof state !== "undefined" && (state === "title" || state === "loading" || state === "cutscene")) {
+      if (this.resT > 0) this.clearResult();
+    }
+    if (this.resT > 0) {
+      this.resT = Math.max(0, this.resT - Math.max(0, dt || 0));
+      if (this.resT <= 0) this.clearResult();
+      /**
+       * 结算大字在的时候**完全不要碰**同步轴 HUD：
+       * 主循环那边 _hudHold(1.8s) 还没过期，每帧都会调 show() 把面板又拉回来，
+       * 于是结算框和三套文字叠在一起（截图里白色轴条就压在结算框下沿）。
+       */
+      return;
+    }
     if (!duel || (!duel.active && !(duel._hudHold > 0))) {
       this.hide();
       return;
@@ -433,6 +569,8 @@ var DomainDuel = class {
 
   reset() {
     this.active = false;
+    // 结算大字也要跟着清（独立验证 A9：reset 后面板仍 cls="win on" 挂在屏幕上）
+    if (typeof DomainDuelHud !== "undefined" && DomainDuelHud) DomainDuelHud.clearResult();
     this.tug = 0;
     this.life = 0;
     this.elapsed = 0;
@@ -504,6 +642,7 @@ var DomainDuel = class {
       screenAnchor: false
     });
     cb.pushEvent({ type: "duel_begin" });
+    DomainDuelHud.clearResult();   // 上一局的胜负大字先收掉，别压在新对局上
     DomainDuelHud.show();
   }
 
@@ -922,6 +1061,26 @@ var DomainDuel = class {
         size: 1.4
       });
     }
+    /**
+     * 整屏结算面板（用户：「领域对拼输赢好像显示不够明显 不知道是输了还是赢了」）。
+     * 分数、代价、下一步怎么按全写在同一屏上，不靠一条 2.4s 的顶部横幅。
+     */
+    try {
+      const winSide = winner === SIDE.GOJO ? SIDE.GOJO : winner === SIDE.SUKUNA ? SIDE.SUKUNA : null;
+      DomainDuelHud.result({
+        kind: winSide === SIDE.GOJO ? "win" : winSide === SIDE.SUKUNA ? "lose" : "draw",
+        byTime: timeUp,
+        sync: this.sync,
+        miss: this.miss,
+        elapsed: this.elapsed,
+        dmg: winSide
+          ? Math.round(TUNE.CLASH_WIN_DMG[winSide] * TUNE.INCOMING_SCALE)
+          : Math.round(90 * TUNE.INCOMING_SCALE),
+        burnout: winSide ? TUNE.BURNOUT[loserSide] : TUNE.DRAW_BURNOUT
+      });
+    } catch (e) {
+      console.warn("[duel] 结算面板失败:", e);
+    }
     cb.domains.onClashResolved(winner || null);
   }
 
@@ -992,6 +1151,7 @@ onHook("clash", createDomainDuel);
 onHook("reset", function () {
   if (DomainDuelCurrent) DomainDuelCurrent.reset();
   DomainDuelHud.hide();
+  DomainDuelHud.clearResult();   // 结算大字也必须清掉（独立验证 A9：reset 后面板还挂着）
 });
 
 /**

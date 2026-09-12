@@ -99,6 +99,14 @@
     // (dt, snap)                  每帧 HUD
     segment: [],
     // (cb,p0,p1,r,meta)->bool     命中扫掠；true = 这次攻击被本模块吃掉
+    /**
+     * 近战的「副目标」（魔虚罗俯冲落地后的 1.6s 弱点窗口）。
+     * (cb, attack) -> { p:{x,z}, r:number, weak?:boolean } | null
+     *   只改两件事：① 射程门槛（range + r）② 这条扫掠线朝哪指。
+     *   伤害归属**不变**（仍是 attack.target = 宿傩）；副目标自己的结算走 segment 钩子。
+     *   返回 null = 没有副目标，combat.js 的每一步都与模块缺席时逐字一致。
+     */
+    meleeAim: [],
     aim: [],
     // (cb,owner,from,dir,skill)   改写弹道方向
     damageGate: [],

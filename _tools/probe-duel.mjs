@@ -412,14 +412,22 @@ try {
   }
   const hudOk = await b.evaluate(E2E_STATE);
   OUT.sections.hud = hudOk.hud;
-  if (hudOk.hud) {
-    log('  HUD：' + JSON.stringify(hudOk.hud));
-    check('HUD 有同步轴 / 同步计数 / 裂纹计数', /同步 ×\d/.test(hudOk.hud.sync) && /裂纹 \d\/3/.test(hudOk.hud.crack) && hudOk.hud.axis.w > 100, hudOk.hud);
-    check('HUD 字号 >= 13px', parseFloat(hudOk.hud.titlePx) >= 13 && parseFloat(hudOk.hud.hintPx) >= 13, { title: hudOk.hud.titlePx, hint: hudOk.hud.hintPx });
+  /**
+   * ⚠ 采样点必须在**对拼进行中**。
+   * 本轮（Lead，2026-09-12）加了整屏结算面板 #duel-result：面板出现的 3s 内
+   * 同步轴 HUD 会主动收起（不然两套字叠在一起，用户报的「不知道是输了还是赢了」之一）。
+   * 结算后的快照里 HUD 天然是隐藏的，用它断言"HUD 可见"会变成一条假 FAIL。
+   */
+  const midHudOk = (OUT.sections.e2e['e2e-perfect'] && OUT.sections.e2e['e2e-perfect'].mid) || null;
+  const hudSample = (midHudOk && midHudOk.hud) || hudOk.hud;
+  if (hudSample) {
+    log('  HUD（对拼中采样）：' + JSON.stringify(hudSample));
+    check('HUD 有同步轴 / 同步计数 / 裂纹计数', /同步 ×\d/.test(hudSample.sync) && /裂纹 \d\/3/.test(hudSample.crack) && hudSample.axis.w > 100, hudSample);
+    check('HUD 字号 >= 13px', parseFloat(hudSample.titlePx) >= 13 && parseFloat(hudSample.hintPx) >= 13, { title: hudSample.titlePx, hint: hudSample.hintPx });
     // 用「对撞进行中」那一帧量重叠（旧面板只在 clashActive 时可见）
-    const midHud = OUT.sections.e2e['e2e-perfect'] && OUT.sections.e2e['e2e-perfect'].mid ? OUT.sections.e2e['e2e-perfect'].mid.hud : null;
+    const midHud = (midHudOk && midHudOk.hud) || hudSample;
     const doo = (midHud && midHud.overlap) || {};
-    const dooBad = Object.keys(doo).filter(k => doo[k] > 0);
+    const dooBad = Object.keys(doo).filter((k) => doo[k] > 0);
     check('桌面同步轴与旧「領域対決」面板零重叠', Object.keys(doo).length >= 3 && dooBad.length === 0, doo);
   } else {
     check('HUD DOM 存在', false, null);
