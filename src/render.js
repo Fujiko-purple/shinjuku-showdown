@@ -93,6 +93,10 @@ uniform vec2  uTexel;
 uniform float uTime;
 uniform float uBloom;      // 泛光强度（已在上层做过上限）
 uniform float uBloomCap;   // 单像素泛光贡献上限
+uniform float uBloomFloor; // 泛光高通地板：扣掉"大面积亮部"的低频分量
+uniform sampler2D tHaze;   // 1/16 分辨率的邻域平均亮度：判"周围有多大一片亮"
+uniform float uHazeK;      // 大面积亮部压制强度
+uniform float uHazeKnee;   // 开始压制的邻域亮度门槛
 uniform float uFlash;      // 闪光强度
 uniform vec3  uFlashColor;
 uniform float uFlashTone;  // 闪光「亮度自适应」系数
@@ -132,11 +136,31 @@ void main() {
   base *= 1.0 + uRadial * ( 0.85 * ring * ring );
   base = mix( base, base * 0.72, clamp( uRadial * 0.55, 0.0, 0.6 ) * clamp( cd, 0.0, 1.0 ) );
 
-  /* --- 泛光叠加：加法但每像素封顶 ---
+  /* --- 泛光叠加：高通化 + 每像素封顶 ---
    * 泛光只负责「亮的东西往四周溢一点」，绝不能把整片的暗部提亮成灰白。
-   * uBloomCap 把单像素的泛光贡献锁死，超过的部分直接丢掉。
+   *
+   * 【task-6 修复】旧版把模糊结果直接乘强度加上去 —— 模糊结果里天然含有
+   * 「大面积亮部的低频分量」。沿街机位下几十个街灯的光锥叠成一片大面积暖色，
+   * 它的低频分量被原样加回画面，就成了糊掉画面中段的一片暖雾。
+   * 现在先减掉地板 uBloomFloor 再放大（高通）：**只保留局部凸起的光晕，
+   * 大面积均匀亮部的贡献被扣掉**；小而亮的核（火星/术式核心）不受影响。
    */
-  vec3 bloom = min( texture2D( tBloom, uv ).rgb * uBloom, vec3( uBloomCap ) );
+  vec3 bl = texture2D( tBloom, uv ).rgb;
+  bl = max( bl - vec3( uBloomFloor ), vec3( 0.0 ) ) / max( 1e-3, 1.0 - uBloomFloor );
+  vec3 bloom = min( bl * uBloom, vec3( uBloomCap ) );
+
+  /* --- 大面积亮部压制（task-6 核心修复）---
+   * tHaze 是场景在 1/16 分辨率下的邻域平均：它高 = 这块地方"一大片都亮"。
+   * 对这样的区域做一次轻度的局部色调映射把底板压下去，而局部对比（细节）不受影响；
+   * 单个亮点（火星、术式核心）邻域平均很低，完全不会被动到。
+   */
+  float haze = dot( texture2D( tHaze, uv ).rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+  float hazeAmt = clamp( uHazeK * max( 0.0, haze - uHazeKnee ), 0.0, 1.4 );
+  base *= 1.0 / ( 1.0 + hazeAmt );
+  // 大面积暖光同时轻微去色：不然整片橙黄会把画面的色彩空间占满，看着像蒙了一层滤镜
+  float baseLum = dot( base, vec3( 0.2126, 0.7152, 0.0722 ) );
+  base = mix( base, vec3( baseLum ), clamp( hazeAmt * 0.42, 0.0, 0.55 ) );
+
   vec3 col = base + bloom;
 
   /* --- 曝光保护：先量当前像素有多亮 --- */
@@ -280,6 +304,25 @@ void main() {
     blurV.needsSwap = false;
     blurH.clear = false;
     blurV.clear = false;
+    /* --- 大面积亮部侦测（task-6）---
+     * 街灯体积光锥叠在一起时，画面中段会变成一大片暖色，而它的亮度可能低于泛光阈值，
+     * 所以"泛光高通"压不掉它（实测 bloom on/off 的中段亮度只差 0.2/89）。
+     * 这里额外做一路 1/16 分辨率的极低分辨率模糊：得到每个像素"周围有多大一片亮"，
+     * 交给合成 pass 做局部色调映射（大面积亮 → 压低，局部亮点不动）。
+     * 成本：2 个 1/16 分辨率的全屏 draw，桌面/手机都可忽略。
+     */
+    const hazeRT_A = new WebGLRenderTarget(1, 1, { type: rtType, depthBuffer: false, stencilBuffer: false });
+    const hazeRT_B = new WebGLRenderTarget(1, 1, { type: rtType, depthBuffer: false, stencilBuffer: false });
+    hazeRT_A.texture.name = "hazeA";
+    hazeRT_B.texture.name = "hazeB";
+    hazeRT_A.texture.generateMipmaps = false;
+    hazeRT_B.texture.generateMipmaps = false;
+    const hazeH = makeBlur(new Vector2(1, 0));
+    const hazeV = makeBlur(new Vector2(0, 1));
+    hazeH.needsSwap = false;
+    hazeV.needsSwap = false;
+    hazeH.clear = false;
+    hazeV.clear = false;
     const composite = new ShaderPass({
       uniforms: {
         tDiffuse: { value: null },
@@ -288,6 +331,10 @@ void main() {
         uTime: { value: 0 },
         uBloom: { value: 0.5 },
         uBloomCap: { value: 0.65 },
+        uBloomFloor: { value: 0.14 },
+        tHaze: { value: null },
+        uHazeK: { value: 12 },
+        uHazeKnee: { value: 0.04 },
         uFlash: { value: 0 },
         uFlashColor: { value: new Color(1, 1, 1) },
         uFlashTone: { value: 0.6 },
@@ -327,13 +374,18 @@ void main() {
       // 取两者之间：整体抬一档但保住暗部层次，blownPct 保持 0。
       // 用户反馈"打击被压平"后重新配比：抬亮度主要靠线性增益（保住黑位与对比），
       // 少用 gamma 抬中间调 —— gamma 才是"画面被抬平"的元凶。
-      high: { blurRadius: 1.3, bloom: 0.62, bloomCap: 0.8, grain: 0.03, chromaBase: 2.8, vignette: 0.58, shoulder: 0.8, knee: 0.9, ceil: 2.6, exposure: 1.3, lift: 0.0008, gamma: 0.935 },
-      medium: { blurRadius: 1.1, bloom: 0.52, bloomCap: 0.68, grain: 0.022, chromaBase: 2.2, vignette: 0.56, shoulder: 0.85, knee: 0.85, ceil: 2.4, exposure: 1.28, lift: 0.0008, gamma: 0.94 },
-      low: { blurRadius: 0.9, bloom: 0.4, bloomCap: 0.55, grain: 0, chromaBase: 1.6, vignette: 0.54, shoulder: 0.95, knee: 0.8, ceil: 2.2, exposure: 1.25, lift: 0.0008, gamma: 0.945 }
+      // task-6：泛光加高通地板（bloomFloor），半径小幅收紧 —— 只让"小而亮"的东西发光，
+      // 大面积亮部（沿街的街灯光锥）不再糊成一片暖雾。
+      high: { hazeK: 12, hazeKnee: 0.04, blurRadius: 1.15, bloom: 0.62, bloomCap: 0.8, bloomFloor: 0.14, grain: 0.03, chromaBase: 2.8, vignette: 0.58, shoulder: 0.8, knee: 0.9, ceil: 2.6, exposure: 1.3, lift: 0.0008, gamma: 0.935 },
+      medium: { hazeK: 11, hazeKnee: 0.045, blurRadius: 1.0, bloom: 0.52, bloomCap: 0.68, bloomFloor: 0.16, grain: 0.022, chromaBase: 2.2, vignette: 0.56, shoulder: 0.85, knee: 0.85, ceil: 2.4, exposure: 1.28, lift: 0.0008, gamma: 0.94 },
+      low: { hazeK: 10, hazeKnee: 0.05, blurRadius: 0.85, bloom: 0.4, bloomCap: 0.55, bloomFloor: 0.18, grain: 0, chromaBase: 1.6, vignette: 0.54, shoulder: 0.95, knee: 0.8, ceil: 2.2, exposure: 1.25, lift: 0.0008, gamma: 0.945 }
     };
     let Q = TIERS[quality2];
     composite.uniforms.uBloom.value = Q.bloom;
     composite.uniforms.uBloomCap.value = Q.bloomCap;
+    composite.uniforms.uBloomFloor.value = Q.bloomFloor;
+    composite.uniforms.uHazeK.value = Q.hazeK;
+    composite.uniforms.uHazeKnee.value = Q.hazeKnee;
     composite.uniforms.uGrain.value = Q.grain;
     composite.uniforms.uVignette.value = Q.vignette;
     composite.uniforms.uKnee.value = Q.knee;
@@ -374,6 +426,14 @@ void main() {
       const bh = Math.max(1, Math.floor(h * pr * 0.5));
       blurRT_A.setSize(bw, bh);
       blurRT_B.setSize(bw, bh);
+      const hw = Math.max(1, Math.floor(w * pr / 16));
+      const hh = Math.max(1, Math.floor(h * pr / 16));
+      hazeRT_A.setSize(hw, hh);
+      hazeRT_B.setSize(hw, hh);
+      hazeH.uniforms.uTexel.value.set(1 / hw, 1 / hh);
+      hazeV.uniforms.uTexel.value.set(1 / hw, 1 / hh);
+      hazeH.uniforms.uRadius.value = 1.6;
+      hazeV.uniforms.uRadius.value = 1.6;
       blurH.uniforms.uTexel.value.set(1 / bw, 1 / bh);
       blurV.uniforms.uTexel.value.set(1 / bw, 1 / bh);
       blurH.uniforms.uRadius.value = Q.blurRadius;
@@ -496,6 +556,16 @@ void main() {
         gl.clear();
         blurV.fsQuad.render(gl);
       }
+      // 大面积亮部侦测：1/16 分辨率的双向模糊（只跑两个很小的 draw）
+      hazeH.uniforms.tDiffuse.value = rb.texture;
+      gl.setRenderTarget(hazeRT_A);
+      gl.clear();
+      hazeH.fsQuad.render(gl);
+      hazeV.uniforms.tDiffuse.value = hazeRT_A.texture;
+      gl.setRenderTarget(hazeRT_B);
+      gl.clear();
+      hazeV.fsQuad.render(gl);
+      composite.uniforms.tHaze.value = hazeRT_B.texture;
       composite.uniforms.tBloom.value = blurRT_A.texture;
       // 保护直出时合成里不再叠闪光（否则和 DOM 闪光叠成两倍）
       const wantFlash = usePost && flashToPost;
@@ -507,6 +577,9 @@ void main() {
       const key = q === "low" || q === "medium" ? q : "high";
       Q = TIERS[key];
       composite.uniforms.uBloomCap.value = Q.bloomCap;
+      composite.uniforms.uBloomFloor.value = Q.bloomFloor;
+      composite.uniforms.uHazeK.value = Q.hazeK;
+      composite.uniforms.uHazeKnee.value = Q.hazeKnee;
       composite.uniforms.uGrain.value = Q.grain;
       composite.uniforms.uVignette.value = Q.vignette;
       composite.uniforms.uKnee.value = Q.knee;
@@ -528,6 +601,10 @@ void main() {
       outputPass.dispose?.();
       blurRT_A.dispose();
       blurRT_B.dispose();
+      hazeRT_A.dispose();
+      hazeRT_B.dispose();
+      hazeH.dispose?.();
+      hazeV.dispose?.();
       renderer.dispose();
     }
     resize(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1);
@@ -574,6 +651,9 @@ void main() {
           ceil: composite.uniforms.uCeil.value,
           bloom: +composite.uniforms.uBloom.value.toFixed(3),
           bloomCap: composite.uniforms.uBloomCap.value,
+          bloomFloor: composite.uniforms.uBloomFloor.value,
+          hazeK: composite.uniforms.uHazeK.value,
+          hazeKnee: composite.uniforms.uHazeKnee.value,
           bloomThreshold: brightPass.uniforms.uThreshold.value,
           exposure: composite.uniforms.uExposure.value,
           lift: composite.uniforms.uLift.value,

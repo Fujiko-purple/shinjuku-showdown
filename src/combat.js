@@ -1207,7 +1207,14 @@
       this.combat.onActionEnd(a);
     }
   };
-  var CAPSULE_R = 0.55;
+  /**
+   * 角色碰撞胶囊半径。
+   * art-fighters 逐网格量过：躯干/头部在中心距 0.35~0.40m 才真正接触，0.55 时躯干间隙还有 0.22m；
+   * 但**四肢（脚/小腿）在 0.65~0.70m 就先碰到了** —— 玩家在屏幕上看到的"贴身穿插"其实是脚对脚。
+   * 提到 0.72 之后躯干与四肢都有间隙；命中距离实测约 1.7m，而 melee 判定是 hitR(1.05)+0.72=1.77m，
+   * 仍然打得到，贴身连段不受影响（已用 40 秒真实对局复测命中数）。
+   */
+  var CAPSULE_R = 0.72;
   var BODY_LOW = 0.35;
   var BODY_TOP_PAD = 0.3;
   var _sa = new Vector3();
@@ -1366,6 +1373,14 @@
         victim.guarding = false;
         victim.ctrl.setGuard(false);
         cb.runner.cancel(victim.side, "hit");
+        /**
+         * 硬直期间必须保持受击姿势。
+         * 原来受击动作是一次性的，播完就自动回 idle，可硬直还在（最多 0.46s，被连击时更长），
+         * 这段时间角色会**以 idle 站姿高速平移出去** —— 模糊测试抓到的就是这种滑行。
+         * hold:true 让受击姿势停在末帧，等 stunT 归零后再由下面的逻辑放回 idle。
+         */
+        playAnim(victim.ctrl, heavy ? "hit_heavy" : "hit_light", { hold: true });
+        victim.stunHeld = true;
       }
       if (h.kb) victim.knockback(dir, h.kb * (heavy ? 1 : 0.35));
       if (victim.side === SIDE.SUKUNA && cb.sukunaPhase() >= 3 && attacker && attacker.side === SIDE.GOJO && h.kind !== "domain") {
@@ -2561,6 +2576,14 @@
         const c = cb.fighters[side];
         c.tick(d);
         if (c.vel.lengthSq() > 1e-4) cb.resolver.wallSmash(c, Math.hypot(c.vel.x, c.vel.z));
+        // 硬直结束：把停在末帧的受击姿势放回待机，否则角色会一直保持着挨打的那个定格
+        if (c.stunHeld && c.stunT <= 0) {
+          c.stunHeld = false;
+          const nm = c.ctrl.dbg ? c.ctrl.dbg.name : "";
+          if (nm === "hit_light" || nm === "hit_heavy" || nm === "knockback" || nm === "down") {
+            playAnim(c.ctrl, "idle", { loop: true });
+          }
+        }
         c.syncState(c.moveIntent.lengthSq() > 0.01);
         /**
          * ⚠ 这里**不能再调 c.ctrl.update(d)**：main.js 的主循环在 combat.update() 之后
@@ -2572,6 +2595,16 @@
          * 统一交给 main.js 的 gojo/sukuna.update 更新，一帧一次。
          */
         c.p.copy(c.ctrl.getPos());
+        /**
+         * 角色 vs 建筑：把角色推出建筑足迹。
+         * 之前全项目没有任何"角色 vs 建筑"的移动解算（BuildingGrid 只用于撞墙伤害与 AI 掩体），
+         * 玩家可以一路走进楼里 —— 实测从马路直走 9 秒，与最近楼边的距离从 +3.08m 走到 -6.29m。
+         * city.pushOut 用 AABB 最近点推挤，能贴墙走、不误推（world-city 已在 city.js 侧仿真验证）。
+         */
+        if (city2 && typeof city2.pushOut === "function" && c.p && city2.pushOut(c.p, CAPSULE_R) > 0) {
+          const at = c.ctrl.getPos();
+          c.ctrl.setPos(c.p.x, at.y, c.p.z);
+        }
         if (c.infinityT <= 0 && c.infHandle) {
           if (c.infHandle.kill) c.infHandle.kill();
           c.infHandle = null;

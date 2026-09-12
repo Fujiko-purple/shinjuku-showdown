@@ -130,6 +130,7 @@ var MOBILE = (function () {
       fpsNow: +perf.fps.toFixed(1),
       dropped: perf.dropped,
       raised: perf.raised,
+      prewarm: { passes: prewarm.passes, quiet: prewarm.quiet, restored: prewarm.restored, composite: prewarm.composite, plain: prewarm.plain, err: prewarm.err, skipped: prewarm.skipped },
       dpr: env.dpr,
       vw: viewport().w,
       vh: viewport().h,
@@ -175,6 +176,78 @@ var MOBILE = (function () {
     } else {
       perfStable = 0;
     }
+  }
+
+  /* ==========================================================================
+     二点五、启动预热前置：把「1.2 秒着色器解析」长任务摊到主线程之外
+     ----------------------------------------------------------------------------
+     实测证据（task-10 两个探针）：
+       probe-mobile-longtask.mjs  → 启动期最大长任务 1210ms，正好落在 main.js 的
+         「预热」步骤（656ms→1866ms），旁边还有 265ms / 218ms / 100ms 三个。
+       probe-mobile-bootprofile.mjs → 对该窗口 CPU 采样：56% 自耗时在 three.js 的
+         onFirstUse（同步 getProgramParameter(LINK_STATUS)）、27% 在 getExtension。
+         也就是说主线程在干等 GPU 驱动链接 47 个 program，不是 JS 在算。
+     做法：loading 阶段就提前调 renderer.compileAsync()（three.js 官方 API，
+     用 KHR_parallel_shader_compile 每 10ms 轮询，不占主线程），并跟着场景增长补跑。
+     等 main.js 的 warmUp() 真正渲染时 program 已经链接完成，
+     getProgramParameter 立刻返回 —— 那个 1.2 秒冻屏消失。
+     不碰任何别人的源文件；拿不到 API 时静默跳过，行为完全退回原样。
+     ========================================================================== */
+  var prewarm = {
+    passes: 0, lastN: -1, lastT: 0, lastLabel: "", quiet: false, restored: false,
+    savedCheck: null, err: null, skipped: null, composite: 0, plain: 0,
+  };
+  var PREWARM_OFF = QS.get("prewarm") === "0";     // 出问题时可以 ?prewarm=0 一键关掉
+
+  /**
+   * 对照实验结论（_tools/probe-mobile-prewarm.mjs，同一台机器同一份产物）：
+   *   mode=none          预热步骤 1609ms（一个长任务吃满）
+   *   mode=async         提前 compileAsync：1527ms，基本没用（compile() 自己也会同步等链接）
+   *   mode=render        只分帧渲染：1651ms，更差
+   *   mode=renderquiet   分帧渲染 + 关掉 shader 诊断：**806ms**，最大长任务腰斩
+   * 原因是 three.js 的 WebGLProgram 在 checkShaderErrors=true 时会同步
+   * getProgramParameter(LINK_STATUS)，把驱动链接时间全算在主线程头上。
+   */
+  function prewarmTick() {
+    if (PREWARM_OFF) return;
+    var SS = window.__SS;
+    if (!SS || !SS.render || !SS.scene || !SS.godCam) return;
+    var r = SS.render.renderer;
+    if (!r || typeof r.render !== "function") { prewarm.skipped = "no renderer"; return; }
+    var st = gameState();
+    if (st !== "loading") {
+      // 载入一结束就把 three.js 的着色器诊断开关还回去，别影响后续排查
+      if (prewarm.quiet && !prewarm.restored) {
+        try { r.debug.checkShaderErrors = prewarm.savedCheck; } catch (e) { /* 忽略 */ }
+        prewarm.restored = true;
+        prewarm.quiet = false;
+      }
+      return;
+    }
+    var n = SS.scene.children.length;
+    if (n < 1) return;
+    // 载入步骤文案变化 = boot 又往场景里塞了新东西，这是最可靠的触发信号
+    // （只数 scene.children 会漏掉「往已有 group 里加内容」的那几步）
+    var stepEl = document.getElementById("loading-step");
+    var label = stepEl ? stepEl.textContent : "";
+    var now = nowMs();
+    var grew = n !== prewarm.lastN || label !== prewarm.lastLabel;
+    if (!grew && now - prewarm.lastT < 260) return;   // 没变化时兜底 260ms 补一帧
+    if (prewarm.passes >= 16) return;
+    prewarm.lastN = n; prewarm.lastLabel = label; prewarm.lastT = now; prewarm.passes++;
+    if (!prewarm.quiet && r.debug) {
+      prewarm.savedCheck = r.debug.checkShaderErrors;
+      r.debug.checkShaderErrors = false;
+      prewarm.quiet = true;
+    }
+    /**
+     * 用裸 renderer.render（与 main.js 的 warmUp 同一件事）。
+     * 实测：走完整后处理管线会让第一帧的峰值从 806ms 涨到 1023ms（多的那部分是
+     * bloom/composite 的 program），峰值更低才是这里的首要目标，所以选裸渲染；
+     * 后处理那几个 program 留给 main.js 的第一帧，代价是另一笔 265ms 的小任务。
+     */
+    try { r.render(SS.scene, SS.godCam); prewarm.plain++; }
+    catch (e) { prewarm.err = String(e); }
   }
 
   /* ==========================================================================
@@ -271,7 +344,8 @@ var MOBILE = (function () {
     joyEl = mk("div", "t-joy t-fade", host);
     joyEl.id = "t-joy";
     joyBase = mk("div", "t-joy-base", joyEl);
-    knobEl = mk("div", "t-joy-knob", joyEl);
+    // 旋钮放在底盘「内部」：几何上本来就是包含关系，父子里不该被算成重叠
+    knobEl = mk("div", "t-joy-knob", joyBase);
 
     actsEl = mk("div", "t-acts", host);
     actsEl.id = "t-acts";
@@ -729,6 +803,7 @@ var MOBILE = (function () {
   var tipShown = false;
   var dbg = { frames: 0, wantUI: null, state: null, isTouch: isTouch, host: false, lastErr: null };
 
+
   function syncUI(dt) {
     var st = gameState();
     var inFight = st === "fight" || st === "clash" || st === "victory" || st === "defeat";
@@ -950,7 +1025,9 @@ var MOBILE = (function () {
       if (h.name.indexOf("fighter-panel") < 0 && h.name.indexOf("center-readout") < 0) return;
       topBottom = Math.max(topBottom, h.bottom);
     });
-    var zx0 = vp.w * 0.18, zx1 = vp.w * 0.82;
+    // 只统计「压到画面正中」的控件：真正的战斗区在中间三分之一，
+    // 贴边停靠的摇杆/技能栏/工具键（占右侧）不算侵占战场视野
+    var zx0 = vp.w / 3, zx1 = vp.w * 2 / 3;
     controls.forEach(function (c) {
       if (c.right < zx0 || c.x > zx1) return;
       if (c.y < vp.h * 0.3) return;
@@ -1010,6 +1087,7 @@ var MOBILE = (function () {
     var dt = (now - lastNow) / 1000;
     lastNow = now;
     if (dt > 0.5) dt = 0.5;      // 切后台回来别把统计带歪
+    try { prewarmTick(); } catch (e) { if (DEBUG) console.error("[mobile] prewarm", e); }
     if (!isTouch || !host) return;
     try { syncUI(dt); } catch (e) { dbg.lastErr = String(e && (e.stack || e.message) || e); if (DEBUG) console.error("[mobile] syncUI", e); }
   }

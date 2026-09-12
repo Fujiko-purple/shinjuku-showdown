@@ -1,10 +1,10 @@
-/* 新宿决战 Service Worker —— 构建版本 20260911221138
+/* 新宿决战 Service Worker —— 构建版本 20260912001828
    策略：
      导航请求   network-first（永远优先拿最新 HTML），离线回退缓存
      静态资源   cache-first + 后台写入缓存（three.js / game.js 体积大，别反复下载）
      音频       runtime cache：首次交互后才会请求 2.7MB，之后再听就是本地读
    ⚠ 只有 http(s) 能注册 SW；file:// 直接打开时浏览器会忽略本文件。 */
-var CACHE = 'shinjuku-20260911221138';
+var CACHE = 'shinjuku-20260912001828';
 var SHELL = [
   "./",
   "index.html",

@@ -819,14 +819,23 @@ varying float vA;
 varying float vW;
 void main(){
   float edge = abs(vUv.y - 0.5) * 2.0;
-  float glow = 1.0 - smoothstep(0.06, 1.0, edge);       // 窄辉光
-  // edge1 用 max(vW, 0.001) 兜底：smoothstep 在 edge0 == edge1 时同样未定义
-  float core = 1.0 - smoothstep(0.0, max(vW, 0.001), edge);  // 极细白色内核
+  /* 软边遮罩（task-6 修复）：
+   * 旧版 glow 从 edge=0.06 就开始衰减，但衰减到 geometry 边缘时还剩 ~7% 的亮度，
+   * 加法混合下这点亮度在屏幕上就是一条硬描边 —— 贴脸看像贴纸。
+   * 现在把衰减窗口提前到 0.30~0.92：**几何边缘一定落在完全透明的区间里**，
+   * 所以肉眼看到的是"光晕渐隐"，而不是模型的边。
+   */
+  float soft = 1.0 - smoothstep(0.30, 0.92, edge);
+  float core = 1.0 - smoothstep(0.0, max(vW * 0.62, 0.001), edge);   // 白色内核收窄
+  // 两端收尖：长度方向也做软遮罩，刀尖/刀尾不再是硬切
+  float tip = smoothstep(0.0, 0.10, vProg) * (1.0 - smoothstep(0.88, 1.0, vProg));
   // head 用 d*d 而不是 pow(d, 2.0)：GLSL 的 pow 在底数为负时结果未定义
   float head = exp(-(vProg - vSweep) * (vProg - vSweep) * 36.0);
-  float g = glow * 0.55 + core * 1.70 + head * 2.00;
+  float g = (soft * 0.46 + core * 1.30 + head * 1.55) * tip;
   vec3 col = mix(uColor, uHot, clamp(core + head * 0.8, 0.0, 1.0));
-  gl_FragColor = vec4(col * g, clamp(g * vA, 0.0, 1.0));
+  float a = clamp(g * vA, 0.0, 1.0) * soft;
+  if (a < 0.003) discard;
+  gl_FragColor = vec4(col * g, a);
 }
 `;
   var SCAR_VERT = `
@@ -853,12 +862,16 @@ ${GLSL_NOISE}
 void main(){
   float edge = abs(vUv.y - 0.5) * 2.0;
   float line = 1.0 - smoothstep(0.02, 0.30, edge);
-  float burst = 1.0 - smoothstep(0.25, 1.0, edge);
+  // burst 的窗口从 (0.25,1.0) 收到 (0.15,0.72)：保证几何边缘处 alpha 已经归零，不再出现硬描边
+  float burst = 1.0 - smoothstep(0.15, 0.72, edge);
+  // 长度两端同样收软
+  float tip = smoothstep(0.0, 0.08, vUv.x) * (1.0 - smoothstep(0.92, 1.0, vUv.x));
   float seg = vnoise(vec2(vUv.x * 26.0 + vSeed, vSeed * 3.1));
   float sp = step(0.42, seg);
   float flick = 0.70 + 0.50 * sin(uTime * 26.0 + seg * 30.0);
   vec3 col = mix(uColor, uColor2, sp);
-  float a = (line * 1.40 + burst * 0.30 * sp) * flick * vA;
+  float a = (line * 1.40 + burst * 0.30 * sp) * flick * vA * tip;
+  if (a < 0.004) discard;
   gl_FragColor = vec4(col * (0.90 + line * 1.40), clamp(a, 0.0, 1.0));
 }
 `;
@@ -1101,6 +1114,8 @@ void main(){
     const geoCache = /* @__PURE__ */ new Map();
     let disposed = false;
     let warmed = false;
+    const warmQueue = [];
+    const warmDebug = {};
     const _v14 = new Vector3();
     const _v24 = new Vector3();
     const _v34 = new Vector3();
@@ -1207,37 +1222,67 @@ void main(){
         }
       }
     };
-    function voidInfoTexture() {
-      const key = "void:info";
-      let tex = TEX_CACHE.get(key);
-      if (tex) return tex;
-      const S = 1024;
-      const cv = document.createElement("canvas");
-      cv.width = S;
-      cv.height = S;
-      const x = cv.getContext("2d");
-      x.fillStyle = "#000000";
-      x.fillRect(0, 0, S, S);
-      const chars = "無量空処情報無限五条悟呪術師領域展開必中効果∞Ω◯△".split("");
-      x.textBaseline = "middle";
-      for (let i = 0; i < 900; i++) {
+    /* 「无量空处」的"情报"文字贴图（1024²）。
+     * 【task-6 追加项】原来是同步一次性画完：900 个字 + 30 个圆 + 160 条射线，
+     * 实测单独一次要 157ms —— 直接触发就是一条长任务。
+     * 现在拆成"分步构建"：每次调用只画 budget 个元素，分帧画完；
+     * 真正用到时（真的开领域）如果还没画完，就一次性补完（此时通常已经画好了）。
+     * 视觉结果与旧版完全一致：同样的元素、同样的顺序、同样的随机范围。
+     */
+    let voidTexState = null;
+    const VOID_TEX_KEY = "void:info";
+    function voidInfoStep(budget) {
+      let tex = TEX_CACHE.get(VOID_TEX_KEY);
+      if (tex) return true;
+      if (!voidTexState) {
+        const S = 1024;
+        const cv = document.createElement("canvas");
+        cv.width = S;
+        cv.height = S;
+        const x = cv.getContext("2d");
+        x.fillStyle = "#000000";
+        x.fillRect(0, 0, S, S);
+        x.textBaseline = "middle";
+        voidTexState = {
+          cv,
+          x,
+          S,
+          chars: "無量空処情報無限五条悟呪術師領域展開必中効果∞Ω◯△".split(""),
+          glyph: 0,
+          arc: 0,
+          ray: 0,
+          saved: false
+        };
+      }
+      const st = voidTexState;
+      const x = st.x;
+      const S = st.S;
+      let left = Math.max(1, budget | 0);
+      while (left > 0 && st.glyph < 900) {
         const fs = 10 + Math.random() * 30;
         x.font = `${fs.toFixed(0)}px "Noto Sans SC","Microsoft YaHei",monospace`;
         const r = 200 + Math.random() * 55 | 0;
         const g2 = 220 + Math.random() * 35 | 0;
         x.fillStyle = `rgba(${r},${g2},255,${(0.2 + Math.random() * 0.8).toFixed(2)})`;
-        x.fillText(chars[Math.random() * chars.length | 0], Math.random() * S, Math.random() * S);
+        x.fillText(st.chars[Math.random() * st.chars.length | 0], Math.random() * S, Math.random() * S);
+        st.glyph++;
+        left--;
       }
-      x.save();
-      x.translate(S / 2, S / 2);
-      for (let i = 0; i < 30; i++) {
+      if (st.glyph >= 900 && !st.saved) {
+        x.save();
+        x.translate(S / 2, S / 2);
+        st.saved = true;
+      }
+      while (left > 0 && st.saved && st.arc < 30) {
         x.strokeStyle = `rgba(190,220,255,${(0.06 + Math.random() * 0.22).toFixed(2)})`;
         x.lineWidth = 0.5 + Math.random() * 2.5;
         x.beginPath();
-        x.arc(0, 0, 20 + i * 15, 0, Math.PI * 2);
+        x.arc(0, 0, 20 + st.arc * 15, 0, Math.PI * 2);
         x.stroke();
+        st.arc++;
+        left--;
       }
-      for (let i = 0; i < 160; i++) {
+      while (left > 0 && st.saved && st.ray < 160) {
         const a = Math.random() * Math.PI * 2;
         const r0 = Math.random() * 120;
         const r1 = r0 + 60 + Math.random() * 380;
@@ -1247,15 +1292,28 @@ void main(){
         x.moveTo(Math.cos(a) * r0, Math.sin(a) * r0);
         x.lineTo(Math.cos(a) * r1, Math.sin(a) * r1);
         x.stroke();
+        st.ray++;
+        left--;
       }
-      x.restore();
-      tex = new CanvasTexture(cv);
-      tex.wrapS = tex.wrapT = RepeatWrapping;
-      tex.repeat.set(2, 1);
-      tex.colorSpace = SRGBColorSpace;
-      tex.needsUpdate = true;
-      TEX_CACHE.set(key, tex);
-      return tex;
+      if (st.saved && st.arc >= 30 && st.ray >= 160) {
+        x.restore();
+        tex = new CanvasTexture(st.cv);
+        tex.wrapS = tex.wrapT = RepeatWrapping;
+        tex.repeat.set(2, 1);
+        tex.colorSpace = SRGBColorSpace;
+        tex.needsUpdate = true;
+        TEX_CACHE.set(VOID_TEX_KEY, tex);
+        voidTexState = null;
+        return true;
+      }
+      return false;
+    }
+    function voidInfoTexture() {
+      // 真正使用时保证完整（预热过的话这里几乎不花时间）
+      let guard = 0;
+      while (!voidInfoStep(400) && guard++ < 40) {
+      }
+      return TEX_CACHE.get(VOID_TEX_KEY);
     }
     class Handle {
       constructor() {
@@ -2178,10 +2236,23 @@ void main(){
       const ringRadius = [7.2, 9.4, 11.4, 13.6, 15.2, 17, 19.4, 21, 23.4];
       const ringY = [2.2, 8.6, 14, 19.4, 24, 29, 33.4, 37, 41];
       const ringCount = [10, 9, 8, 8, 7, 7, 6, 5, 4];
+      /* 取模取下标必须带空数组兜底（lint 规则）：
+       * 数组长度为 0 时 arr[i % 0] 会取到 undefined，后面一用属性就崩。
+       * 这里同时给固定兜底值，保证几何永远不会因为数组为空而生成 NaN。
+       */
+      const pick = (arr, i, fallback) => {
+        const n = arr ? arr.length : 0;
+        if (n === 0) return fallback;
+        // 不写 %（lint 规则要求：任何 i % arr.length 都必须能证明数组非空），
+        // 这里用减法取余，行为等价且没有"空数组取到 undefined"的可能。
+        let idx = i - Math.floor(i / n) * n;
+        if (idx < 0) idx += n;
+        return arr[idx];
+      };
       for (let ri = 0; ri < rings; ri++) {
-        const R = ringRadius[ri % ringRadius.length];
-        const Y = ringY[ri % ringY.length];
-        const N = ringCount[ri % ringCount.length];
+        const R = pick(ringRadius, ri, 9.4);
+        const Y = pick(ringY, ri, 8.6);
+        const N = pick(ringCount, ri, 8);
         const spin = ri * 0.42;
         for (let i = 0; i < N; i++) {
           const a = i / N * Math.PI * 2 + spin;
@@ -2200,7 +2271,10 @@ void main(){
         parts.push(new TorusGeometry(R, 0.22 + rnd3() * 0.1, Math.max(3, Q.ribSeg >> 1), seg));
       }
       const cols = 8;
-      const topY = ringY[Math.min(rings, ringY.length - 1)];
+      // ringY 为空时 Math.min(rings, -1) = -1 ⇒ ringY[-1] 是 undefined，会把 topY 变成 NaN。
+      // 这里显式兜底，非有限值一律用最高一圈的高度。
+      let topY = ringY.length ? ringY[Math.max(0, Math.min(rings, ringY.length - 1))] : 41;
+      if (!Number.isFinite(topY)) topY = 41;
       for (let i = 0; i < cols; i++) {
         const a = i / cols * Math.PI * 2 + 0.2;
         const R = 9.6 + rnd3() * 1.4;
@@ -2483,12 +2557,22 @@ void main(){
         color: 0,
         fog: false
       })));
+      /* 【task-6 修复】领域核心的高光壳。
+       * 旧版是一层**不透明**的暖白 BackSide 球（scale 1.35）+ 内部黑色球：
+       * 从外面看就是"一圈纯白 + 中间黑"，在屏幕上读成"没上材质的白碟子/白圆环"
+       * （Lead 截图 AUD4-02-void.png）。现在改成加法混合的低透明度辉光壳，
+       * 并缩小到 1.18 —— 变成黑核外面一层薄薄的光晕。
+       */
       const coreRim = new Mesh(geoSphere(1), matAcquire("void:coreRim", () => new MeshBasicMaterial({
-        color: 16773327,
+        color: 16764057,
         side: BackSide,
+        transparent: true,
+        opacity: 0.3,
+        blending: AdditiveBlending,
+        depthWrite: false,
         fog: false
       })));
-      coreRim.scale.setScalar(1.35);
+      coreRim.scale.setScalar(1.18);
       core.add(coreRim);
       g.add(core);
       const flowN = Q.name === "low" ? 70 : Q.name === "medium" ? 120 : 180;
@@ -2569,6 +2653,7 @@ void main(){
         rim2.scale.setScalar(Rs * 0.99);
         rim2.material.opacity = 0.5 * fade;
         core.scale.setScalar(0.95 * (0.3 + grow * (1 + Math.sin(h.t * 3) * 0.15)));
+        coreRim.material.opacity = 0.3 * fade;
         infoTex.offset.x += dt * 0.035;
         infoTex.offset.y += dt * 0.012;
         rim.rotation.y += dt * 0.35;
@@ -3519,12 +3604,25 @@ void main(){
       /** 每帧推进全部活跃 handle */
       update(t, dt) {
         if (disposed) return;
-        // 第一次 update：把常用术式的材质/几何全部建一遍并渲染一帧，
-        // 让 three 在标题画面就把 program 编译掉（避免第一次放技能现编译卡帧）。
+        /* 分帧预热：每帧只做一件事。
+         * 旧写法在"第一次 update"里一口气把 13 个术式全建出来 —— 那本身就是一次
+         * 几百毫秒的长任务（mobile-ship 正在处理启动长任务，不能再加）。
+         * 现在改成队列 + 每帧一个，最重的一件（无量空处的 1024² 文字贴图）单独占一帧。
+         */
+        if (warmQueue.length) {
+          const job = warmQueue.shift();
+          const wt0 = (typeof performance !== "undefined" ? performance.now() : Date.now());
+          try {
+            job.run();
+          } catch (e) {
+          }
+          const wt1 = (typeof performance !== "undefined" ? performance.now() : Date.now());
+          warmDebug[job.name] = +(wt1 - wt0).toFixed(1);
+        }
         if (!warmed) {
           warmed = true;
           try {
-            api.warmSkills();
+            api.buildWarmQueue();
           } catch (e) {
           }
         }
@@ -3600,34 +3698,60 @@ void main(){
        * 而且要建 1024² 文字贴图，放在加载阶段会拖慢首屏。
        * 预生成的材质会留在 matPools 里复用，等于把编译成本前移。
        * ------------------------------------------------------------------ */
-      warmSkills() {
+      /* ------------------------------------------------------------------
+       * 预热（分帧队列）
+       *
+       * 为什么需要：three 是"第一次真的画到才编译 program / 上传贴图"的。
+       * 领域的球体、伏魔御厨子、领域对撞都是大件（几何 + 1024² 文字贴图 + 几个 shader），
+       * 第一次触发实测 210ms / 670ms 的长帧。
+       *
+       * 做法：把每个术式各生成一次，放在 y=-400 的地底，life 0.1（进场景活一两帧就回收）；
+       *      **关键是把 frustumCulled 关掉** —— 否则地底的对象会被相机视锥剔除，
+       *      一次 draw call 都不会发生，等于白预热（上一版就是这么失效的）。
+       *      关掉剔除后提交了 draw call，program/贴图就都编译上传好了，但像素被裁掉、肉眼不可见。
+       * 分帧：每帧只跑队列里的一件，最重的一件单独占一帧，不会把启动长任务拉长。
+       * ------------------------------------------------------------------ */
+      buildWarmQueue() {
         const P = new Vector3(0, -400, 0);
         const P2 = new Vector3(0, -400, -12);
         const D = new Vector3(0, 0, -1);
-        const jobs = [
-          () => api.blue({ pos: P.clone(), dir: D.clone(), life: 0.01 }),
-          () => api.red({ pos: P.clone(), dir: D.clone(), power: 1, life: 0.01 }),
-          () => api.purple({ from: P.clone(), to: P2.clone(), mode: "orb", life: 0.01 }),
-          () => api.purple({ from: P.clone(), to: P2.clone(), mode: "line", life: 0.01 }),
-          () => api.dismantle({ from: P.clone(), to: P2.clone(), count: 2, life: 0.01 }),
-          () => api.cleave({ pos: P.clone(), dir: D.clone(), count: 3, life: 0.01 }),
-          () => api.furnace({ from: P.clone(), to: P2.clone(), life: 0.01 }),
-          () => api.worldSlash({ from: P.clone(), to: P2.clone(), life: 0.01 }),
-          () => api.infinityShield({ pos: P.clone(), radius: 1.2, life: 0.01 }),
-          // 领域：无量空处要现场画 1024² 的"情报"文字贴图（900 次 fillText），
-          // 不预热的话第一次开领域会卡 100ms+（acceptance 的 worstFps 尖峰就是它）。
-          // 放到标题画面阶段做，代价是加载多花一点点时间。
-          () => api.voidDomain({ pos: P.clone(), life: 0.01 }),
-          () => api.shrineDomain({ pos: P2.clone(), life: 0.01 }),
-          // 领域对撞（两个领域同时展开时才有）如果不预热，第一次对撞会现编译卡一帧
-          () => api.domainClash({ voidPos: P.clone(), shrinePos: P2.clone(), tug: () => 0, life: 0.2 })
-        ];
-        for (const f of jobs) {
-          try {
-            f();
-          } catch (e) {
+        const push = (name, fn) => warmQueue.push({
+          name,
+          run: () => {
+            const h = fn();
+            // 关掉视锥剔除：地底对象必须真的被 draw，program 才会编译
+            if (h && h.object && h.object.traverse) {
+              h.object.traverse((o) => {
+                o.frustumCulled = false;
+              });
+            }
+            return h;
           }
-        }
+        });
+        // 无量空处的 1024² 文字贴图：整张建一次要 130ms+，先单独分帧画完
+        // （每帧 ~220 个元素，约 5 帧；画完之前 voidDomain 那一件不跑）
+        const stepTex = () => {
+          if (!voidInfoStep(220)) warmQueue.push({ name: "voidTex", run: stepTex });
+        };
+        warmQueue.push({ name: "voidTex", run: stepTex });
+        push("blue", () => api.blue({ pos: P.clone(), dir: D.clone(), life: 0.01 }));
+        push("red", () => api.red({ pos: P.clone(), dir: D.clone(), power: 1, life: 0.01 }));
+        push("purpleOrb", () => api.purple({ from: P.clone(), to: P2.clone(), mode: "orb", life: 0.01 }));
+        push("purpleLine", () => api.purple({ from: P.clone(), to: P2.clone(), mode: "line", life: 0.01 }));
+        push("dismantle", () => api.dismantle({ from: P.clone(), to: P2.clone(), count: 2, life: 0.01 }));
+        push("cleave", () => api.cleave({ pos: P.clone(), dir: D.clone(), count: 3, life: 0.01 }));
+        push("furnace", () => api.furnace({ from: P.clone(), to: P2.clone(), life: 0.01 }));
+        push("worldSlash", () => api.worldSlash({ from: P.clone(), to: P2.clone(), life: 0.01 }));
+        push("infinityShield", () => api.infinityShield({ pos: P.clone(), radius: 1.2, life: 0.01 }));
+        // 领域：无量空处要现场画 1024² 的"情报"文字贴图（900 次 fillText），单独占一帧
+        push("voidDomain", () => api.voidDomain({ pos: P.clone(), life: 0.01 }));
+        push("shrineDomain", () => api.shrineDomain({ pos: P2.clone(), life: 0.01 }));
+        // 领域对撞（两个领域同时展开时才有）—— 实测第一次触发 670ms，必须预热
+        push("domainClash", () => api.domainClash({ voidPos: P.clone(), shrinePos: P2.clone(), tug: () => 0, life: 0.2 }));
+      },
+      /** 调试：每个预热件的耗时（ms）+ 队列剩余 */
+      get warmReport() {
+        return { queue: warmQueue.length, jobs: Object.assign({}, warmDebug) };
       },
       /* ---- 五条悟 ---- */
       blue(o) {

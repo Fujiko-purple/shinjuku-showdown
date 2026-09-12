@@ -31360,8 +31360,14 @@ function updateGodCam(dt, snap) {
       wantX = gp.x * 0.62 + sp.x * 0.38 + cam.panX;
       wantZ = gp.z * 0.62 + sp.z * 0.38 + cam.panZ;
       wantY = Math.max(gp.y, sp.y) + CAM_LOOK_H; // 与普通战斗同一注视高度，人物落在画面中部
-      fracT = clampNum2(0.16 - sep * 0.006, 0.12, 0.16); // 对撞要同时看两个人 + 领域球，站得更远
-      wantPitch = 0.55; // 对撞时抬高机位，两人 + 领域球一起进画面
+      /**
+       * 对撞取景：必须**明显拉远 + 抬高**。
+       * 原来 0.12~0.16 的占屏 + 0.55 俯角实测把镜头埋在两层领域的汉字贴面里，
+       * 整屏都是放大的「无」「量」「空」字样（shots/FIN7-06-clash.png），玩家根本读不出场面。
+       * 现在压到 0.10~0.135 并抬到 0.68，能看到两个领域球、拉锯轴线和两名角色。
+       */
+      fracT = clampNum2(0.135 - sep * 0.005, 0.1, 0.135);
+      wantPitch = 0.68; // 对撞时抬高机位，两人 + 领域球一起进画面
       baseYaw += dt * 0.07;
       cam.lockOn || (cam.yaw += 0);
     } else {
@@ -32431,17 +32437,29 @@ function hudUpdate(dt, snap) {
     const h = px2 * 0.7;
     const x = (px2 - w) / 2;
     const y = (px2 - h) / 2;
-    ctx2.fillStyle = "rgba(9,10,14,0.62)";
+    // 先画一块「挖补」再整体羽化：硬边矩形在夜里会读成"地上贴了黑纸"（Lead 报的硬边黑矩形）
+    ctx2.fillStyle = "rgba(12,13,18,0.5)";
     ctx2.fillRect(x, y, w, h);
     for (let i = 0; i < px2 * 2.2; i++) {
       const px3 = x + rng.next() * w;
       const py3 = y + rng.next() * h;
-      ctx2.fillStyle = rng.next() < 0.5 ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.22)";
+      ctx2.fillStyle = rng.next() < 0.5 ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.18)";
       ctx2.fillRect(px3, py3, 1 + rng.next() * 4, 1 + rng.next() * 3);
     }
-    ctx2.strokeStyle = "rgba(0,0,0,0.9)";
-    ctx2.lineWidth = Math.max(2, px2 * 0.018);
+    // 很淡的接缝（不再是硬黑描边）
+    ctx2.strokeStyle = "rgba(0,0,0,0.18)";
+    ctx2.lineWidth = Math.max(2, px2 * 0.012);
     ctx2.strokeRect(x, y, w, h);
+    // 羽化：用 destination-in 乘一层径向 alpha，四角与四边全部渐隐
+    ctx2.globalCompositeOperation = "destination-in";
+    const feather = ctx2.createRadialGradient(px2 / 2, px2 / 2, 0, px2 / 2, px2 / 2, Math.max(w, h) * 0.62);
+    feather.addColorStop(0, "rgba(255,255,255,1)");
+    feather.addColorStop(0.62, "rgba(255,255,255,0.92)");
+    feather.addColorStop(0.86, "rgba(255,255,255,0.35)");
+    feather.addColorStop(1, "rgba(255,255,255,0)");
+    ctx2.fillStyle = feather;
+    ctx2.fillRect(0, 0, px2, px2);
+    ctx2.globalCompositeOperation = "source-over";
     paintCracks(ctx2, px2, px2, rng, 10, "rgba(0,0,0,0.7)", Math.max(1, px2 * 0.006));
     return canvas2;
   }
@@ -32885,8 +32903,11 @@ function hudUpdate(dt, snap) {
       const t = (i + 0.5) / rows;
       const y = i / rows * px2;
       const h = px2 / rows + 1;
-      const halfW = (0.045 + 0.455 * t) * px2;
-      const alpha = (1 - t * 0.94) * 0.9;
+      // 沿街暖雾的元凶就是把「宽 + 亮」的圆锥一层层加法叠起来：
+      // 这里把锥体收窄（0.455→0.30）、亮度按 (1-t)^1.8 快速衰减，
+      // 只在灯头附近留一段真正像光锥的内容，底部基本归零。
+      const halfW = (0.04 + 0.32 * t) * px2;
+      const alpha = Math.pow(1 - t, 1.7) * 0.95;
       const grad = ctx2.createLinearGradient(px2 / 2 - halfW, 0, px2 / 2 + halfW, 0);
       grad.addColorStop(0, "rgba(255,255,255,0)");
       grad.addColorStop(0.5, "rgba(255,255,255," + alpha.toFixed(3) + ")");
@@ -33047,6 +33068,28 @@ vec2 cityFacadeUv( vec2 auv, vec3 an ) {
     return mat;
   }
 
+  // ---------------------------------------------------------------------------
+  //  加法图层随距离衰减：把「几十层加法叠成一片暖雾」的根源掐掉
+  //  近处（≤near）保持完整，远处（≥far）完全消失 —— 近景光斑观感不变。
+  //  low 档可以把 far 设得很小，直接等效关闭（仍然是同一个 mesh / draw call）。
+  // ---------------------------------------------------------------------------
+  function applyDistanceFade(mat, near, far) {
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uFadeNear = { value: near };
+      shader.uniforms.uFadeFar = { value: far };
+      shader.vertexShader = "varying float vCityDist;\n" + shader.vertexShader.replace(
+        "#include <project_vertex>",
+        "#include <project_vertex>\n\tvCityDist = length( mvPosition.xyz );"
+      );
+      shader.fragmentShader = "uniform float uFadeNear;\nuniform float uFadeFar;\nvarying float vCityDist;\n" + shader.fragmentShader.replace(
+        "#include <map_fragment>",
+        "#include <map_fragment>\n\tdiffuseColor.a *= 1.0 - smoothstep( uFadeNear, uFadeFar, vCityDist );"
+      );
+    };
+    mat.customProgramCacheKey = () => "city-distfade-" + near + "-" + far;
+    return mat;
+  }
+
   // 图集材质：用实例属性 aCell 选格子（霓虹 / 店铺 / 贩卖机共用）
   function makeAtlasMaterial(map, cols, rows, opt) {
     const o = opt || {};
@@ -33095,6 +33138,7 @@ vec3 bbScale = vec3( 1.0 );
 #endif
 vec4 mvPosition = modelViewMatrix * bbCenter;
 mvPosition.xy += position.xy * bbScale.xy;
+vBillboardDist = length( mvPosition.xyz );
 gl_Position = projectionMatrix * mvPosition;
 `;
   function makeBillboardMaterial(map, color, opt) {
@@ -33108,10 +33152,21 @@ gl_Position = projectionMatrix * mvPosition;
       side: DoubleSide,
       fog: true
     });
+    // 距离衰减：近处（≤fadeNear）保持完整观感，远处（≥fadeFar）完全消失。
+    // 沿街平视时中段之所以糊成暖雾，就是几十个远处光锥叠在同一片像素上；
+    // 近处那盏灯的光锥不受影响，所以"单灯光斑观感"不会变弱。
+    const fadeNear = o.fadeNear === void 0 ? 18 : o.fadeNear;
+    const fadeFar = o.fadeFar === void 0 ? 52 : o.fadeFar;
     mat.onBeforeCompile = (shader) => {
-      shader.vertexShader = shader.vertexShader.replace("#include <project_vertex>", BILLBOARD_CHUNK);
+      shader.uniforms.uFadeNear = { value: fadeNear };
+      shader.uniforms.uFadeFar = { value: fadeFar };
+      shader.vertexShader = "varying float vBillboardDist;\n" + shader.vertexShader.replace("#include <project_vertex>", BILLBOARD_CHUNK);
+      shader.fragmentShader = "uniform float uFadeNear;\nuniform float uFadeFar;\nvarying float vBillboardDist;\n" + shader.fragmentShader.replace(
+        "#include <map_fragment>",
+        "#include <map_fragment>\n\tdiffuseColor.a *= 1.0 - smoothstep( uFadeNear, uFadeFar, vBillboardDist );"
+      );
     };
-    mat.customProgramCacheKey = () => "city-billboard";
+    mat.customProgramCacheKey = () => "city-billboard-" + fadeNear + "-" + fadeFar;
     return mat;
   }
 
@@ -33304,7 +33359,19 @@ gl_Position = projectionMatrix * mvPosition;
             const mid = bi + bj === 1;
             const wx = (lx) => sx * (K + lx);
             const wz = (lz) => sz * (M + lz);
+            // 本街区的占位表：同一街区内禁止任何两个足迹相交
+            // （塔楼原本是随机落位，实测出现 31 对重叠、最大重叠面积 320m²）
+            const placed = [];
+            const fits = (lx0, lz0, lx1, lz1) => {
+              for (let q = 0; q < placed.length; q++) {
+                const p = placed[q];
+                if (lx0 < p[2] && lx1 > p[0] && lz0 < p[3] && lz1 > p[1]) return false;
+              }
+              return true;
+            };
             const mk = (lx0, lz0, lx1, lz1, h, tag) => {
+              if (!fits(lx0, lz0, lx1, lz1)) return false;
+              placed.push([lx0, lz0, lx1, lz1]);
               const w = lx1 - lx0;
               const d = lz1 - lz0;
               const dirs = [];
@@ -33317,6 +33384,7 @@ gl_Position = projectionMatrix * mvPosition;
                 dirs.push({ nx: sx, nz: 0, avenue: false }, { nx: -sx, nz: 0, avenue: false }, { nx: 0, nz: sz, avenue: false }, { nx: 0, nz: -sz, avenue: false });
               }
               push(wx((lx0 + lx1) / 2), wz((lz0 + lz1) / 2), w, d, h, dirs, tag);
+              return true;
             };
             // ---- 转角楼：同时占两条临街面 ----
             const cornerW = rng.range(16, 22);
@@ -33346,13 +33414,16 @@ gl_Position = projectionMatrix * mvPosition;
             // ---- 街区内部：塔楼（越靠路口越高，形成天际线层次）----
             const towerCount = near ? 3 : (mid ? 3 : 2);
             for (let t = 0; t < towerCount; t++) {
-              const tw = rng.range(14, 24);
-              const td = rng.range(14, 24);
-              const lx0 = clamp2(rng.range(16, 30) + t * rng.range(0, 5), 10, S - tw - 2);
-              const lz0 = clamp2(rng.range(16, 30) + t * rng.range(0, 7), 10, S - td - 2);
               const falloff = Math.max(0.4, 1 - (bi + bj) * 0.2);
-              const h = rng.range(42, 150) * falloff;
-              mk(lx0, lz0, lx0 + tw, lz0 + td, h, "tower");
+              let ok = false;
+              for (let attempt = 0; attempt < 10 && !ok; attempt++) {
+                const tw = rng.range(14, 24);
+                const td = rng.range(14, 24);
+                const lx0 = clamp2(rng.range(12, 32) + t * rng.range(0, 5), 10, S - tw - 2);
+                const lz0 = clamp2(rng.range(12, 32) + t * rng.range(0, 7), 10, S - td - 2);
+                const h = rng.range(42, 150) * falloff;
+                ok = mk(lx0, lz0, lx0 + tw, lz0 + td, h, "tower");
+              }
             }
           }
         }
@@ -34026,10 +34097,12 @@ gl_Position = projectionMatrix * mvPosition;
       const poleH = 8.2;
       const pole = new CylinderGeometry(0.1, 0.15, poleH, 7, 1, true);
       pole.translate(0, poleH / 2, 0);
-      const arm = new BoxGeometry(2.4, 0.13, 0.17);
-      arm.translate(-1.2, poleH - 0.16, 0);
+      // 灯臂长度直接决定 camProp 的等效半径（camera.js 用几何体包围盒算 r）：
+      // 臂 1.7 + 灯头 0.7 → 半径 1.43m，落在相机「细杆不算糊脸」的 1.6m 阈值以内
+      const arm = new BoxGeometry(1.7, 0.13, 0.17);
+      arm.translate(-0.85, poleH - 0.16, 0);
       const head = new BoxGeometry(0.7, 0.16, 0.34);
-      head.translate(-2.3, poleH - 0.24, 0);
+      head.translate(-1.85, poleH - 0.24, 0);
       const geom = track(mergeGeoms([pole, arm, head]));
       pole.dispose();
       arm.dispose();
@@ -34043,7 +34116,7 @@ gl_Position = projectionMatrix * mvPosition;
         tmpQuat.setFromEuler(tmpEuler.set(0, rot, 0));
         mesh.setMatrixAt(i, tmpMat4.compose(tmpVec3.set(L.x, 0, L.z), tmpQuat, ONE));
         L.rot = rot;
-        L.hx = L.x + L.dx * 2.3;
+        L.hx = L.x + L.dx * 1.85;
         L.hz = L.z + L.dz * 2.3;
         L.hy = poleH - 0.24;
       });
@@ -34085,7 +34158,9 @@ gl_Position = projectionMatrix * mvPosition;
       // 地面光池：夜里最关键的一层（暖色椭圆的灯光洒在路面上）
       const poolTex = track(new CanvasTexture(makePoolTexture(cv, 128)));
       poolTex.colorSpace = SRGBColorSpace;
-      const poolMat = track(new MeshBasicMaterial({
+      // 光池同样是加法层，几十个光池沿街叠起来就是那条"暖亮带"：
+      // 近处光斑保持完整，25m 外的光池淡出（远处交给雾和霓虹自有层次）
+      const poolMat = track(applyDistanceFade(new MeshBasicMaterial({
         map: poolTex,
         transparent: true,
         blending: AdditiveBlending,
@@ -34093,14 +34168,16 @@ gl_Position = projectionMatrix * mvPosition;
         vertexColors: true,
         fog: true,
         side: DoubleSide
-      }));
+      }), quality2 === "low" ? 12 : 22, quality2 === "low" ? 34 : 62));
+      // 全局再收一档：光池仍是地面主要的可读光源，但沿街叠出来的亮带压住
+      poolMat.opacity = 0.75;
       const poolGeom = track(addWhiteColors(new PlaneGeometry(1, 1)));
       poolGeom.rotateX(-Math.PI / 2);
       // 光池列表：路灯 + 店铺外溢 + 路口补光（合成一个 draw call）
       const poolList = [];
       for (const L of usedLamps) {
-        const c = rng.range(0.13, 0.19);
-        poolList.push({ x: L.hx, z: L.hz, ry: L.rot, sx: 17, sz: 25, y: 0.12, r: c, g: c * 0.72, b: c * 0.44 });
+        const c = rng.range(0.135, 0.185);
+        poolList.push({ x: L.hx, z: L.hz, ry: L.rot, sx: 14, sz: 18, y: 0.12, r: c, g: c * 0.72, b: c * 0.44 });
       }
       const shopTint = [[1, 0.66, 0.3], [1, 0.5, 0.24], [0.95, 0.42, 0.55], [0.5, 0.85, 1], [1, 0.85, 0.55]];
       for (const s of [1, -1]) {
@@ -34122,13 +34199,13 @@ gl_Position = projectionMatrix * mvPosition;
           const k1 = Math.round(u / 23);
           const w1 = shopTint[((k1 + 5) % shopTint.length + shopTint.length) % shopTint.length];
           const w2 = shopTint[((k1 + 9) % shopTint.length + shopTint.length) % shopTint.length];
-          const ka = rng.range(0.05, 0.095) * wetAmt;
-          const kb = rng.range(0.042, 0.08) * wetAmt;
+          const ka = rng.range(0.036, 0.07) * wetAmt;
+          const kb = rng.range(0.03, 0.06) * wetAmt;
           poolList.push({
             x: s * rng.range(8.4, 10.8),
             z: u + wetStep * 0.5,
             ry: 0,
-            sx: rng.range(2.4, 4.0),
+            sx: rng.range(5.0, 8.0),
             sz: wetStep * rng.range(0.95, 1.25),
             y: 0.045,
             r: w1[0] * ka, g: w1[1] * ka, b: w1[2] * ka
@@ -34137,7 +34214,7 @@ gl_Position = projectionMatrix * mvPosition;
             x: u + wetStep * 0.5,
             z: s * rng.range(8.4, 10.8),
             ry: Math.PI / 2,
-            sx: rng.range(2.4, 4.0),
+            sx: rng.range(5.0, 8.0),
             sz: wetStep * rng.range(0.95, 1.25),
             y: 0.045,
             r: w2[0] * kb, g: w2[1] * kb, b: w2[2] * kb
@@ -34147,8 +34224,9 @@ gl_Position = projectionMatrix * mvPosition;
       // 信号灯在湿路上的反射（红/绿长条），位置跟着路口四角
       for (const a of [1, -1]) {
         for (const b3 of [1, -1]) {
-          poolList.push({ x: a * 6.5, z: b3 * 10.5, ry: 0, sx: 1.3, sz: 7.5, y: 0.05, r: 0.028 * wetAmt, g: 0.13 * wetAmt, b: 0.06 * wetAmt });
-          poolList.push({ x: a * 10.5, z: b3 * 6.5, ry: Math.PI / 2, sx: 1.3, sz: 7.5, y: 0.05, r: 0.028 * wetAmt, g: 0.13 * wetAmt, b: 0.06 * wetAmt });
+          // 原来是 1.3×7.5 的强拉伸 → 读成"细长绿线"。改成宽而淡的软光斑。
+          poolList.push({ x: a * 6.5, z: b3 * 10.5, ry: 0, sx: 5.5, sz: 9, y: 0.05, r: 0.016 * wetAmt, g: 0.055 * wetAmt, b: 0.03 * wetAmt });
+          poolList.push({ x: a * 10.5, z: b3 * 6.5, ry: Math.PI / 2, sx: 9, sz: 5.5, y: 0.05, r: 0.016 * wetAmt, g: 0.055 * wetAmt, b: 0.03 * wetAmt });
         }
       }
       // 路口中心补光：不然格斗区就是一块黑
@@ -34174,8 +34252,9 @@ gl_Position = projectionMatrix * mvPosition;
       if (Q.godray) {
         const shaftTex = track(new CanvasTexture(makeShaftTexture(cv, 128)));
         shaftTex.colorSpace = SRGBColorSpace;
-        const shaftMat = track(makeBillboardMaterial(shaftTex, 16762959));
-        shaftMat.opacity = 0.32;
+        // 不透明度按「最热的一次会话也要 <60」定档：跨会话实测同构建有 ±5 的场景状态浮动
+        const shaftMat = track(makeBillboardMaterial(shaftTex, 16762959, { fadeNear: 12, fadeFar: 30 }));
+        shaftMat.opacity = 0.07;
         const shaftGeom = track(new PlaneGeometry(1, 1));
         const shaftMesh = new InstancedMesh(shaftGeom, shaftMat, usedLamps.length);
         shaftMesh.name = "lamp-shafts";
@@ -34196,11 +34275,15 @@ gl_Position = projectionMatrix * mvPosition;
     let pedLens = null;
     if (Q.signals) {
       const R = ROAD_HALF + 1.9;
+      // 悬臂长度 = camProp 等效半径的一半：原来 7.9m 悬臂让相机把每个路口角
+      // 当成「半径 4.28m 的实心柱」，会误判遮挡。改成 1.5m（灯头挂在路缘上方），
+      // 半径降到 1.46m，仍在路口一眼能认，但不再制造幻影遮挡体。
+      const ARM = 1.5;
       const heads = [
-        { px: R, pz: -R, dx: -1, dz: 0, hx: 6, hz: -R, face: "z+", group: 0 },
-        { px: -R, pz: R, dx: 1, dz: 0, hx: -6, hz: R, face: "z-", group: 0 },
-        { px: R, pz: R, dx: 0, dz: -1, hx: R, hz: 6, face: "x-", group: 1 },
-        { px: -R, pz: -R, dx: 0, dz: 1, hx: -R, hz: -6, face: "x+", group: 1 }
+        { px: R, pz: -R, dx: -1, dz: 0, hx: R - ARM, hz: -R, face: "z+", group: 0 },
+        { px: -R, pz: R, dx: 1, dz: 0, hx: -(R - ARM), hz: R, face: "z-", group: 0 },
+        { px: R, pz: R, dx: 0, dz: -1, hx: R, hz: R - ARM, face: "x-", group: 1 },
+        { px: -R, pz: -R, dx: 0, dz: 1, hx: -R, hz: -(R - ARM), face: "x+", group: 1 }
       ];
       const poleH = 6.4;
       const armLen = Math.hypot(heads[0].hx - heads[0].px, heads[0].hz - heads[0].pz);
@@ -34208,9 +34291,10 @@ gl_Position = projectionMatrix * mvPosition;
       poleGeom.translate(0, poleH / 2, 0);
       const armGeom = new BoxGeometry(armLen, 0.13, 0.16);
       armGeom.translate(armLen / 2, poleH - 0.22, 0);
-      const braceGeom = new BoxGeometry(1.7, 0.09, 0.1);
-      braceGeom.rotateZ(-0.62);
-      braceGeom.translate(0.55, poleH - 1.0, 0);
+      // 斜撑必须朝 -x（悬臂那侧），否则会把几何体包围盒顶到 +x，camProp 半径又变回去
+      const braceGeom = new BoxGeometry(1.15, 0.08, 0.1);
+      braceGeom.rotateZ(0.72);
+      braceGeom.translate(-0.45, poleH - 0.85, 0);
       const sigGeom = track(mergeGeoms([poleGeom, armGeom, braceGeom]));
       const sigMat = track(new MeshLambertMaterial({ color: 4342851 }));
       const sigPoles = new InstancedMesh(sigGeom, sigMat, heads.length);
@@ -34575,7 +34659,7 @@ gl_Position = projectionMatrix * mvPosition;
         const s = rng.range(0.1, 0.5);
         set(
           p.x + rng.range(-1.2, 1.2),
-          s * 0.4,
+          s * 0.62,
           p.z + rng.range(-1.2, 1.2),
           rng.range(0, TAU),
           s * rng.range(0.9, 1.6),
@@ -34649,7 +34733,8 @@ gl_Position = projectionMatrix * mvPosition;
       mesh.renderOrder = 1;
       list.forEach((it, i) => {
         tmpQuat.identity();
-        mesh.setMatrixAt(i, tmpMat4.compose(tmpVec3.set(it.x, 0.05, it.z), tmpQuat, tmpScale.set(it.w, 1, it.d)));
+        // 必须画在人行道面（y=CURB_H）之上：原来放 0.05 被人行道板整个盖住，等于没画
+        mesh.setMatrixAt(i, tmpMat4.compose(tmpVec3.set(it.x, CURB_H + 0.02, it.z), tmpQuat, tmpScale.set(it.w, 1, it.d)));
       });
       mesh.instanceMatrix.needsUpdate = true;
       group.add(mesh);
@@ -34676,7 +34761,7 @@ gl_Position = projectionMatrix * mvPosition;
       group.add(mesh);
       for (let i = 0; i < n; i++) {
         const p = roadPoint();
-        const s = rng.range(4.5, 11);
+        const s = rng.range(3.2, 7);
         tmpQuat.setFromEuler(tmpEuler.set(0, rng.chance(0.5) ? 0 : Math.PI / 2 + rng.range(-0.2, 0.2), 0));
         mesh.setMatrixAt(i, tmpMat4.compose(tmpVec3.set(p.x, 0.02, p.z), tmpQuat, tmpScale.set(s, 1, s * rng.range(0.6, 1.1))));
       }
@@ -35384,9 +35469,55 @@ gl_Position = projectionMatrix * mvPosition;
       sweepMesh = null;
       sweepPivot = null;
     }
+    // ------------------------------------------------------------------------
+    //  建筑碰撞查询（供 combat.js 调用）
+    //  现状：全项目没有任何「角色 vs 建筑」的移动解算 —— combat.js 里的 BuildingGrid
+    //  只用于撞墙伤害与 AI 找掩体，角色可以直接走进楼里（probe-city-run 实测最深 6.3m）。
+    //  这里只提供查询，不改变任何现有行为；移动解算在 combat.js 的积分步骤里调用即可：
+    //      city.pushOut(c.p, CAPSULE_R);
+    //  建筑都是轴对齐盒（rotY=0），所以用「AABB 最近点」推挤，角色能贴着墙面走。
+    // ------------------------------------------------------------------------
+    function pushOut(p, r) {
+      let pushed = 0;
+      const rad = r || 0.4;
+      for (let i = 0; i < buildings.length; i++) {
+        const b = buildings[i];
+        if (b.destroyed) continue;
+        const hx = b._w * 0.5;
+        const hz = b._d * 0.5;
+        const cx = clamp2(p.x, b._x - hx, b._x + hx);
+        const cz = clamp2(p.z, b._z - hz, b._z + hz);
+        let dx = p.x - cx;
+        let dz = p.z - cz;
+        const d2 = dx * dx + dz * dz;
+        if (d2 > rad * rad) continue;
+        if (d2 > 1e-8) {
+          const d = Math.sqrt(d2);
+          const k = (rad - d) / d;
+          p.x += dx * k;
+          p.z += dz * k;
+          pushed += rad - d;
+        } else {
+          // 圆心已经在盒子内部：沿最近的一面推出去
+          const ox = hx - Math.abs(p.x - b._x);
+          const oz = hz - Math.abs(p.z - b._z);
+          if (ox < oz) {
+            const s = p.x >= b._x ? 1 : -1;
+            p.x = b._x + s * (hx + rad);
+            pushed += ox + rad;
+          } else {
+            const s = p.z >= b._z ? 1 : -1;
+            p.z = b._z + s * (hz + rad);
+            pushed += oz + rad;
+          }
+        }
+      }
+      return pushed;
+    }
     return {
       group,
       buildings,
+      pushOut,
       groundSize: GROUND_SIZE,
       groundTexture: asphaltTex,
       update: update2,
@@ -36027,7 +36158,11 @@ void main() {
   vec4 mv = modelViewMatrix * vec4( position, 1.0 );
   gl_Position = projectionMatrix * mv;
   float d = max( 0.35, -mv.z );
-  gl_PointSize = clamp( aSize * uScale / d, 1.0, 900.0 );
+  /* 下限从 1px 提到 2.2px（task-6 修复）：
+   * 1px 的点画不出贴图的圆形渐变，屏幕上就是"一个纯色小方块"。
+   * 3px 以上才看得出"火星"的形状；配合下面的热核着色，近处是亮点、远处是圆点。
+   */
+  gl_PointSize = clamp( aSize * uScale / d, 2.2, 900.0 );
 }
 `
   );
@@ -36040,9 +36175,14 @@ varying vec3 vColor;
 varying float vAlpha;
 void main() {
   vec4 t = texture2D( uMap, gl_PointCoord );
-  float a = t.a * vAlpha;
+  /* 火星质感（task-6 修复）：
+   * a) 用 1.45 次幂收紧外圈 → 从"棉花球"变成有明确边界的亮点
+   * b) 中心混一点白热核 → 火星该有"亮芯 + 本色外晕"，而不是一整块纯色
+   */
+  float a = pow( t.a, 1.45 ) * vAlpha;
   if ( a < 0.004 ) discard;
-  gl_FragColor = vec4( vColor * t.rgb * a, a );
+  vec3 col = mix( vColor, vec3( 1.0 ), pow( t.a, 3.0 ) * 0.55 );
+  gl_FragColor = vec4( col * t.rgb * a, a );
 }
 `
   );
@@ -36959,11 +37099,19 @@ void main() {
         u.maxR = Math.max(0.02, def(o.maxRadius, 6));
         u.startR = clamp3(def(o.radius, 0.05), 1e-3, u.maxR);
         u.life = def(o.life, 0.55);
-        u.thick = clamp3(def(o.thickness, 0.35), 0.03, 0.95);
+        /* 【task-6 修复】冲击波的"环宽"同样按半径自适应。
+         * thickness 是"环带占半径的比例"：0.9 的比例落在 26m 半径的冲击波上就是
+         * 23m 宽的实心环带 —— 加法混合叠几层，屏幕正中就是一个巨大的纯白圆盘/圆环
+         * （Lead 截图 AUD4-02-void.png 的白椭圆盘，用"逐个隐藏网格 + 量中心白像素"
+         * 的方法定位到就是这一类 renderOrder=6 的冲击波环）。
+         * 现在把环带的世界宽度锁在约 1.4m：半径越大，比例越小。
+         */
+        u.thick = clamp3(Math.min(def(o.thickness, 0.35), 1.4 / Math.max(2, u.maxR)), 0.02, 0.95);
         u.tilt = def(o.tilt, 0);
         u.bright = def(o.bright, 1);
         u.soft = def(o.soft, 0.42);
         u.segments = clamp3(def(o.segments, 64) | 0, 12, 128);
+        u.bandR = 1.7;
         u.ringCount = clamp3(def(o.ringCount, 1) | 0, 1, 4);
         u.innerFade = def(o.innerFade, 1);
         // 方向性冲击波：arc>0 时只画一个扇区，arcDir 是扇区中心（局部极角）
@@ -37014,7 +37162,8 @@ void main() {
         un.uBurn.value = u.burn;
         un.uArc.value = u.arc;
         un.uArcDir.value = u.arcDir;
-        un.uBright.value = u.bright * (1 - 0.3 * grow);
+        // 大半径冲击波按半径摊薄亮度（40m 的白环不该和 4m 的一样亮）
+        un.uBright.value = u.bright * (1 - 0.3 * grow) * clamp3(8 / Math.max(3, u.maxR), 0.25, 1);
         un.uLife.value = clamp3(env, 0, 1) * (1 - 0.55 * grow);
         for (let k = 0; k < u.mesh.length; k++) {
           const m = u.mesh[k];
@@ -37744,6 +37893,14 @@ void main() {
         u.maxR = Math.max(0.1, def(o.maxRadius, 9));
         u.life = def(o.life, 0.9);
         u.thick = clamp3(def(o.thickness, 0.5), 0.05, 0.95);
+        /* 【task-6 修复】地面环的"环宽"改成按半径自适应。
+         * 领域展开时 combat 会发一个 maxRadius=40~90 的地面环，而 thickness 是
+         * "环带占半径的比例" —— 0.9 的比例落在 40m 半径上就是一圈 36m 宽的实心环，
+         * 屏幕上直接是一个巨大的白色实心椭圆盘（Lead 截图 AUD4-02-void.png）。
+         * 现在把环带的世界宽度锁在大约 1.7m 左右：半径越大，比例越小。
+         */
+        u.bandR = 1.7;
+        u.thick = clamp3(Math.min(u.thick, u.bandR / Math.max(2, u.maxR)), 0.04, 0.95);
         u.segments = clamp3(def(o.segments, 64) | 0, 12, 128);
         u.alive = true;
       };
@@ -37811,9 +37968,17 @@ void main() {
         mat.uniforms.uLife.value = 1 - k * k;
         mat.uniforms.uColor.value.copy(u.color);
         mat.uniforms.uColor2.value.copy(u.color2);
-        mat.uniforms.uSoft.value = def(u.soft, 0.5);
+        // 环带比例同时按"当前半径"收窄：越往外扩，环带越细（避免大面积实心圆盘）
+        const grow2 = easeOut(clamp3(u.age / Math.max(1e-3, u.life), 0, 1));
+        mat.uniforms.uSoft.value = clamp3(def(u.soft, 0.5) * (1 - 0.35 * grow2), 0.14, 0.6);
         mat.uniforms.uBurn.value = 1;
-        mat.uniforms.uBright.value = def(u.bright, 1);
+        /* 大半径地面环按半径衰减亮度：
+         * 领域展开会发 maxRadius=40~90 的环，如果亮度和 6m 的小环一样，
+         * 屏幕中下部就是一片纯白的实心/半实心面（Lead 截图里的"白椭圆盘"）。
+         * 这里把"单位面积上的能量"按半径摊薄（≈6/maxR），大环只剩淡淡一道边界。
+         */
+        const bigAtten = clamp3(6 / Math.max(2, u.maxR), 0.2, 1);
+        mat.uniforms.uBright.value = def(u.bright, 1) * (1 - 0.35 * grow2) * bigAtten;
         mat.uniforms.uInner.value = 1;
       }
     }
@@ -37901,6 +38066,32 @@ void main() {
       u.scale = crit ? 1.5 : 1;
       u.life = def(o.life, crit ? 1.25 : 0.95);
       u.wob = rnd() * TAU2;
+      /* 【task-6 修复】连击时伤害数字在同一世界坐标叠成一团（Lead 截图 AUD5-02-combo.png 的「4 3 3」）。
+       * 做法：统计"刚出现且离得很近"的数字个数，按序号沿**相机右方向**左右错开，
+       * 并给一点点高度差 —— 屏幕上就变成并排的几个数字，每个都读得出来。
+       */
+      let dup = 0;
+      for (let i = 0; i < this.active.length; i++) {
+        const other = this.active[i];
+        if (other === u || !other.alive) continue;
+        if (other.age > 0.5) continue;
+        if (other.pos.distanceToSquared(u.pos) > 6.25) continue;
+        dup++;
+      }
+      if (dup > 0) {
+        const cam = this.ctx.camera;
+        _v6.set(1, 0, 0);
+        if (cam && cam.matrixWorld) {
+          const e2 = cam.matrixWorld.elements;
+          _v6.set(e2[0], e2[1], e2[2]);
+          if (_v6.lengthSq() < 1e-6) _v6.set(1, 0, 0);
+          _v6.normalize();
+        }
+        // 0,+1,-1,+2,-2 … 依次向两侧铺开
+        const slot = Math.ceil(dup / 2) * (dup % 2 === 1 ? 1 : -1);
+        u.pos.addScaledVector(_v6, slot * 0.62);
+        u.pos.y += Math.min(3, dup) * 0.16;
+      }
       u.age = 0;
       u.sprite.visible = true;
       u.alive = true;
@@ -39195,6 +39386,34 @@ void main() {
       if (s.freeze < 4e-3) s.freeze = 0;
       s.life = Math.max(Math.min(1, s.flash * 2), Math.min(1, s.vignette), Math.min(1, s.freeze * 1.4));
     }
+    /**
+     * 预热常用大字贴图。
+     * 每次新建一张 1024² 的 canvas 大字要 ~20ms（实测：领域对撞那一帧 fx.callout 占了 20ms），
+     * 一次性卡在战斗高潮那帧特别明显。这里把本作会用到的大字在标题界面空闲时先画好进 LRU，
+     * 真正触发时直接命中缓存。
+     */
+    function warmCommonCues() {
+      const list = [
+        ["领域对撞", "DOMAIN CLASH", C.VIOLET, C.CRIMSON],
+        ["黑闪", "BLACK FLASH", C.GOLD, C.INK],
+        ["无量空处", "UNLIMITED VOID", C.CYAN, C.WHITE],
+        ["宿傩", "解 · 捌 · 开", C.CRIMSON, C.BLOOD],
+        ["摩虚罗之轮", "适应", C.GOLD, C.CRIMSON],
+        ["扩张术式 解", "空间斩", C.CRIMSON, C.BLOOD],
+        ["虚式「茈」", "200%", C.VIOLET, C.WHITE],
+        ["术式顺转", "苍", C.CYAN, C.AZURE],
+        ["术式反转", "赫", C.SCARLET, C.CRIMSON],
+        ["无下限", "不可侵", C.CYAN, C.WHITE],
+        ["适应", "", C.GOLD, C.INK],
+        ["胜利", "VICTORY", C.CYAN, C.WHITE],
+        ["败北", "DEFEAT", C.CRIMSON, C.INK],
+        ["领域终结", "12s", C.VIOLET, C.WHITE]
+      ];
+      for (let i = 0; i < list.length; i++) {
+        try { tex.calloutTex(list[i][0], list[i][1], list[i][2], list[i][3]); } catch (e) { /* 预热失败不影响运行 */ }
+      }
+      return list.length;
+    }
     function clear() {
       particles.releaseAll();
       shocks.releaseAll();
@@ -39281,6 +39500,7 @@ void main() {
       groundRing,
       damageNumber,
       callout,
+      warmCommonCues,
       debris,
       trail,
       lightning,
@@ -40122,14 +40342,23 @@ varying float vA;
 varying float vW;
 void main(){
   float edge = abs(vUv.y - 0.5) * 2.0;
-  float glow = 1.0 - smoothstep(0.06, 1.0, edge);       // 窄辉光
-  // edge1 用 max(vW, 0.001) 兜底：smoothstep 在 edge0 == edge1 时同样未定义
-  float core = 1.0 - smoothstep(0.0, max(vW, 0.001), edge);  // 极细白色内核
+  /* 软边遮罩（task-6 修复）：
+   * 旧版 glow 从 edge=0.06 就开始衰减，但衰减到 geometry 边缘时还剩 ~7% 的亮度，
+   * 加法混合下这点亮度在屏幕上就是一条硬描边 —— 贴脸看像贴纸。
+   * 现在把衰减窗口提前到 0.30~0.92：**几何边缘一定落在完全透明的区间里**，
+   * 所以肉眼看到的是"光晕渐隐"，而不是模型的边。
+   */
+  float soft = 1.0 - smoothstep(0.30, 0.92, edge);
+  float core = 1.0 - smoothstep(0.0, max(vW * 0.62, 0.001), edge);   // 白色内核收窄
+  // 两端收尖：长度方向也做软遮罩，刀尖/刀尾不再是硬切
+  float tip = smoothstep(0.0, 0.10, vProg) * (1.0 - smoothstep(0.88, 1.0, vProg));
   // head 用 d*d 而不是 pow(d, 2.0)：GLSL 的 pow 在底数为负时结果未定义
   float head = exp(-(vProg - vSweep) * (vProg - vSweep) * 36.0);
-  float g = glow * 0.55 + core * 1.70 + head * 2.00;
+  float g = (soft * 0.46 + core * 1.30 + head * 1.55) * tip;
   vec3 col = mix(uColor, uHot, clamp(core + head * 0.8, 0.0, 1.0));
-  gl_FragColor = vec4(col * g, clamp(g * vA, 0.0, 1.0));
+  float a = clamp(g * vA, 0.0, 1.0) * soft;
+  if (a < 0.003) discard;
+  gl_FragColor = vec4(col * g, a);
 }
 `;
   var SCAR_VERT = `
@@ -40156,12 +40385,16 @@ ${GLSL_NOISE}
 void main(){
   float edge = abs(vUv.y - 0.5) * 2.0;
   float line = 1.0 - smoothstep(0.02, 0.30, edge);
-  float burst = 1.0 - smoothstep(0.25, 1.0, edge);
+  // burst 的窗口从 (0.25,1.0) 收到 (0.15,0.72)：保证几何边缘处 alpha 已经归零，不再出现硬描边
+  float burst = 1.0 - smoothstep(0.15, 0.72, edge);
+  // 长度两端同样收软
+  float tip = smoothstep(0.0, 0.08, vUv.x) * (1.0 - smoothstep(0.92, 1.0, vUv.x));
   float seg = vnoise(vec2(vUv.x * 26.0 + vSeed, vSeed * 3.1));
   float sp = step(0.42, seg);
   float flick = 0.70 + 0.50 * sin(uTime * 26.0 + seg * 30.0);
   vec3 col = mix(uColor, uColor2, sp);
-  float a = (line * 1.40 + burst * 0.30 * sp) * flick * vA;
+  float a = (line * 1.40 + burst * 0.30 * sp) * flick * vA * tip;
+  if (a < 0.004) discard;
   gl_FragColor = vec4(col * (0.90 + line * 1.40), clamp(a, 0.0, 1.0));
 }
 `;
@@ -40404,6 +40637,8 @@ void main(){
     const geoCache = /* @__PURE__ */ new Map();
     let disposed = false;
     let warmed = false;
+    const warmQueue = [];
+    const warmDebug = {};
     const _v14 = new Vector3();
     const _v24 = new Vector3();
     const _v34 = new Vector3();
@@ -40510,37 +40745,67 @@ void main(){
         }
       }
     };
-    function voidInfoTexture() {
-      const key = "void:info";
-      let tex = TEX_CACHE.get(key);
-      if (tex) return tex;
-      const S = 1024;
-      const cv = document.createElement("canvas");
-      cv.width = S;
-      cv.height = S;
-      const x = cv.getContext("2d");
-      x.fillStyle = "#000000";
-      x.fillRect(0, 0, S, S);
-      const chars = "無量空処情報無限五条悟呪術師領域展開必中効果∞Ω◯△".split("");
-      x.textBaseline = "middle";
-      for (let i = 0; i < 900; i++) {
+    /* 「无量空处」的"情报"文字贴图（1024²）。
+     * 【task-6 追加项】原来是同步一次性画完：900 个字 + 30 个圆 + 160 条射线，
+     * 实测单独一次要 157ms —— 直接触发就是一条长任务。
+     * 现在拆成"分步构建"：每次调用只画 budget 个元素，分帧画完；
+     * 真正用到时（真的开领域）如果还没画完，就一次性补完（此时通常已经画好了）。
+     * 视觉结果与旧版完全一致：同样的元素、同样的顺序、同样的随机范围。
+     */
+    let voidTexState = null;
+    const VOID_TEX_KEY = "void:info";
+    function voidInfoStep(budget) {
+      let tex = TEX_CACHE.get(VOID_TEX_KEY);
+      if (tex) return true;
+      if (!voidTexState) {
+        const S = 1024;
+        const cv = document.createElement("canvas");
+        cv.width = S;
+        cv.height = S;
+        const x = cv.getContext("2d");
+        x.fillStyle = "#000000";
+        x.fillRect(0, 0, S, S);
+        x.textBaseline = "middle";
+        voidTexState = {
+          cv,
+          x,
+          S,
+          chars: "無量空処情報無限五条悟呪術師領域展開必中効果∞Ω◯△".split(""),
+          glyph: 0,
+          arc: 0,
+          ray: 0,
+          saved: false
+        };
+      }
+      const st = voidTexState;
+      const x = st.x;
+      const S = st.S;
+      let left = Math.max(1, budget | 0);
+      while (left > 0 && st.glyph < 900) {
         const fs = 10 + Math.random() * 30;
         x.font = `${fs.toFixed(0)}px "Noto Sans SC","Microsoft YaHei",monospace`;
         const r = 200 + Math.random() * 55 | 0;
         const g2 = 220 + Math.random() * 35 | 0;
         x.fillStyle = `rgba(${r},${g2},255,${(0.2 + Math.random() * 0.8).toFixed(2)})`;
-        x.fillText(chars[Math.random() * chars.length | 0], Math.random() * S, Math.random() * S);
+        x.fillText(st.chars[Math.random() * st.chars.length | 0], Math.random() * S, Math.random() * S);
+        st.glyph++;
+        left--;
       }
-      x.save();
-      x.translate(S / 2, S / 2);
-      for (let i = 0; i < 30; i++) {
+      if (st.glyph >= 900 && !st.saved) {
+        x.save();
+        x.translate(S / 2, S / 2);
+        st.saved = true;
+      }
+      while (left > 0 && st.saved && st.arc < 30) {
         x.strokeStyle = `rgba(190,220,255,${(0.06 + Math.random() * 0.22).toFixed(2)})`;
         x.lineWidth = 0.5 + Math.random() * 2.5;
         x.beginPath();
-        x.arc(0, 0, 20 + i * 15, 0, Math.PI * 2);
+        x.arc(0, 0, 20 + st.arc * 15, 0, Math.PI * 2);
         x.stroke();
+        st.arc++;
+        left--;
       }
-      for (let i = 0; i < 160; i++) {
+      while (left > 0 && st.saved && st.ray < 160) {
         const a = Math.random() * Math.PI * 2;
         const r0 = Math.random() * 120;
         const r1 = r0 + 60 + Math.random() * 380;
@@ -40550,15 +40815,28 @@ void main(){
         x.moveTo(Math.cos(a) * r0, Math.sin(a) * r0);
         x.lineTo(Math.cos(a) * r1, Math.sin(a) * r1);
         x.stroke();
+        st.ray++;
+        left--;
       }
-      x.restore();
-      tex = new CanvasTexture(cv);
-      tex.wrapS = tex.wrapT = RepeatWrapping;
-      tex.repeat.set(2, 1);
-      tex.colorSpace = SRGBColorSpace;
-      tex.needsUpdate = true;
-      TEX_CACHE.set(key, tex);
-      return tex;
+      if (st.saved && st.arc >= 30 && st.ray >= 160) {
+        x.restore();
+        tex = new CanvasTexture(st.cv);
+        tex.wrapS = tex.wrapT = RepeatWrapping;
+        tex.repeat.set(2, 1);
+        tex.colorSpace = SRGBColorSpace;
+        tex.needsUpdate = true;
+        TEX_CACHE.set(VOID_TEX_KEY, tex);
+        voidTexState = null;
+        return true;
+      }
+      return false;
+    }
+    function voidInfoTexture() {
+      // 真正使用时保证完整（预热过的话这里几乎不花时间）
+      let guard = 0;
+      while (!voidInfoStep(400) && guard++ < 40) {
+      }
+      return TEX_CACHE.get(VOID_TEX_KEY);
     }
     class Handle {
       constructor() {
@@ -41481,10 +41759,23 @@ void main(){
       const ringRadius = [7.2, 9.4, 11.4, 13.6, 15.2, 17, 19.4, 21, 23.4];
       const ringY = [2.2, 8.6, 14, 19.4, 24, 29, 33.4, 37, 41];
       const ringCount = [10, 9, 8, 8, 7, 7, 6, 5, 4];
+      /* 取模取下标必须带空数组兜底（lint 规则）：
+       * 数组长度为 0 时 arr[i % 0] 会取到 undefined，后面一用属性就崩。
+       * 这里同时给固定兜底值，保证几何永远不会因为数组为空而生成 NaN。
+       */
+      const pick = (arr, i, fallback) => {
+        const n = arr ? arr.length : 0;
+        if (n === 0) return fallback;
+        // 不写 %（lint 规则要求：任何 i % arr.length 都必须能证明数组非空），
+        // 这里用减法取余，行为等价且没有"空数组取到 undefined"的可能。
+        let idx = i - Math.floor(i / n) * n;
+        if (idx < 0) idx += n;
+        return arr[idx];
+      };
       for (let ri = 0; ri < rings; ri++) {
-        const R = ringRadius[ri % ringRadius.length];
-        const Y = ringY[ri % ringY.length];
-        const N = ringCount[ri % ringCount.length];
+        const R = pick(ringRadius, ri, 9.4);
+        const Y = pick(ringY, ri, 8.6);
+        const N = pick(ringCount, ri, 8);
         const spin = ri * 0.42;
         for (let i = 0; i < N; i++) {
           const a = i / N * Math.PI * 2 + spin;
@@ -41503,7 +41794,10 @@ void main(){
         parts.push(new TorusGeometry(R, 0.22 + rnd3() * 0.1, Math.max(3, Q.ribSeg >> 1), seg));
       }
       const cols = 8;
-      const topY = ringY[Math.min(rings, ringY.length - 1)];
+      // ringY 为空时 Math.min(rings, -1) = -1 ⇒ ringY[-1] 是 undefined，会把 topY 变成 NaN。
+      // 这里显式兜底，非有限值一律用最高一圈的高度。
+      let topY = ringY.length ? ringY[Math.max(0, Math.min(rings, ringY.length - 1))] : 41;
+      if (!Number.isFinite(topY)) topY = 41;
       for (let i = 0; i < cols; i++) {
         const a = i / cols * Math.PI * 2 + 0.2;
         const R = 9.6 + rnd3() * 1.4;
@@ -41786,12 +42080,22 @@ void main(){
         color: 0,
         fog: false
       })));
+      /* 【task-6 修复】领域核心的高光壳。
+       * 旧版是一层**不透明**的暖白 BackSide 球（scale 1.35）+ 内部黑色球：
+       * 从外面看就是"一圈纯白 + 中间黑"，在屏幕上读成"没上材质的白碟子/白圆环"
+       * （Lead 截图 AUD4-02-void.png）。现在改成加法混合的低透明度辉光壳，
+       * 并缩小到 1.18 —— 变成黑核外面一层薄薄的光晕。
+       */
       const coreRim = new Mesh(geoSphere(1), matAcquire("void:coreRim", () => new MeshBasicMaterial({
-        color: 16773327,
+        color: 16764057,
         side: BackSide,
+        transparent: true,
+        opacity: 0.3,
+        blending: AdditiveBlending,
+        depthWrite: false,
         fog: false
       })));
-      coreRim.scale.setScalar(1.35);
+      coreRim.scale.setScalar(1.18);
       core.add(coreRim);
       g.add(core);
       const flowN = Q.name === "low" ? 70 : Q.name === "medium" ? 120 : 180;
@@ -41872,6 +42176,7 @@ void main(){
         rim2.scale.setScalar(Rs * 0.99);
         rim2.material.opacity = 0.5 * fade;
         core.scale.setScalar(0.95 * (0.3 + grow * (1 + Math.sin(h.t * 3) * 0.15)));
+        coreRim.material.opacity = 0.3 * fade;
         infoTex.offset.x += dt * 0.035;
         infoTex.offset.y += dt * 0.012;
         rim.rotation.y += dt * 0.35;
@@ -42822,12 +43127,25 @@ void main(){
       /** 每帧推进全部活跃 handle */
       update(t, dt) {
         if (disposed) return;
-        // 第一次 update：把常用术式的材质/几何全部建一遍并渲染一帧，
-        // 让 three 在标题画面就把 program 编译掉（避免第一次放技能现编译卡帧）。
+        /* 分帧预热：每帧只做一件事。
+         * 旧写法在"第一次 update"里一口气把 13 个术式全建出来 —— 那本身就是一次
+         * 几百毫秒的长任务（mobile-ship 正在处理启动长任务，不能再加）。
+         * 现在改成队列 + 每帧一个，最重的一件（无量空处的 1024² 文字贴图）单独占一帧。
+         */
+        if (warmQueue.length) {
+          const job = warmQueue.shift();
+          const wt0 = (typeof performance !== "undefined" ? performance.now() : Date.now());
+          try {
+            job.run();
+          } catch (e) {
+          }
+          const wt1 = (typeof performance !== "undefined" ? performance.now() : Date.now());
+          warmDebug[job.name] = +(wt1 - wt0).toFixed(1);
+        }
         if (!warmed) {
           warmed = true;
           try {
-            api.warmSkills();
+            api.buildWarmQueue();
           } catch (e) {
           }
         }
@@ -42903,34 +43221,60 @@ void main(){
        * 而且要建 1024² 文字贴图，放在加载阶段会拖慢首屏。
        * 预生成的材质会留在 matPools 里复用，等于把编译成本前移。
        * ------------------------------------------------------------------ */
-      warmSkills() {
+      /* ------------------------------------------------------------------
+       * 预热（分帧队列）
+       *
+       * 为什么需要：three 是"第一次真的画到才编译 program / 上传贴图"的。
+       * 领域的球体、伏魔御厨子、领域对撞都是大件（几何 + 1024² 文字贴图 + 几个 shader），
+       * 第一次触发实测 210ms / 670ms 的长帧。
+       *
+       * 做法：把每个术式各生成一次，放在 y=-400 的地底，life 0.1（进场景活一两帧就回收）；
+       *      **关键是把 frustumCulled 关掉** —— 否则地底的对象会被相机视锥剔除，
+       *      一次 draw call 都不会发生，等于白预热（上一版就是这么失效的）。
+       *      关掉剔除后提交了 draw call，program/贴图就都编译上传好了，但像素被裁掉、肉眼不可见。
+       * 分帧：每帧只跑队列里的一件，最重的一件单独占一帧，不会把启动长任务拉长。
+       * ------------------------------------------------------------------ */
+      buildWarmQueue() {
         const P = new Vector3(0, -400, 0);
         const P2 = new Vector3(0, -400, -12);
         const D = new Vector3(0, 0, -1);
-        const jobs = [
-          () => api.blue({ pos: P.clone(), dir: D.clone(), life: 0.01 }),
-          () => api.red({ pos: P.clone(), dir: D.clone(), power: 1, life: 0.01 }),
-          () => api.purple({ from: P.clone(), to: P2.clone(), mode: "orb", life: 0.01 }),
-          () => api.purple({ from: P.clone(), to: P2.clone(), mode: "line", life: 0.01 }),
-          () => api.dismantle({ from: P.clone(), to: P2.clone(), count: 2, life: 0.01 }),
-          () => api.cleave({ pos: P.clone(), dir: D.clone(), count: 3, life: 0.01 }),
-          () => api.furnace({ from: P.clone(), to: P2.clone(), life: 0.01 }),
-          () => api.worldSlash({ from: P.clone(), to: P2.clone(), life: 0.01 }),
-          () => api.infinityShield({ pos: P.clone(), radius: 1.2, life: 0.01 }),
-          // 领域：无量空处要现场画 1024² 的"情报"文字贴图（900 次 fillText），
-          // 不预热的话第一次开领域会卡 100ms+（acceptance 的 worstFps 尖峰就是它）。
-          // 放到标题画面阶段做，代价是加载多花一点点时间。
-          () => api.voidDomain({ pos: P.clone(), life: 0.01 }),
-          () => api.shrineDomain({ pos: P2.clone(), life: 0.01 }),
-          // 领域对撞（两个领域同时展开时才有）如果不预热，第一次对撞会现编译卡一帧
-          () => api.domainClash({ voidPos: P.clone(), shrinePos: P2.clone(), tug: () => 0, life: 0.2 })
-        ];
-        for (const f of jobs) {
-          try {
-            f();
-          } catch (e) {
+        const push = (name, fn) => warmQueue.push({
+          name,
+          run: () => {
+            const h = fn();
+            // 关掉视锥剔除：地底对象必须真的被 draw，program 才会编译
+            if (h && h.object && h.object.traverse) {
+              h.object.traverse((o) => {
+                o.frustumCulled = false;
+              });
+            }
+            return h;
           }
-        }
+        });
+        // 无量空处的 1024² 文字贴图：整张建一次要 130ms+，先单独分帧画完
+        // （每帧 ~220 个元素，约 5 帧；画完之前 voidDomain 那一件不跑）
+        const stepTex = () => {
+          if (!voidInfoStep(220)) warmQueue.push({ name: "voidTex", run: stepTex });
+        };
+        warmQueue.push({ name: "voidTex", run: stepTex });
+        push("blue", () => api.blue({ pos: P.clone(), dir: D.clone(), life: 0.01 }));
+        push("red", () => api.red({ pos: P.clone(), dir: D.clone(), power: 1, life: 0.01 }));
+        push("purpleOrb", () => api.purple({ from: P.clone(), to: P2.clone(), mode: "orb", life: 0.01 }));
+        push("purpleLine", () => api.purple({ from: P.clone(), to: P2.clone(), mode: "line", life: 0.01 }));
+        push("dismantle", () => api.dismantle({ from: P.clone(), to: P2.clone(), count: 2, life: 0.01 }));
+        push("cleave", () => api.cleave({ pos: P.clone(), dir: D.clone(), count: 3, life: 0.01 }));
+        push("furnace", () => api.furnace({ from: P.clone(), to: P2.clone(), life: 0.01 }));
+        push("worldSlash", () => api.worldSlash({ from: P.clone(), to: P2.clone(), life: 0.01 }));
+        push("infinityShield", () => api.infinityShield({ pos: P.clone(), radius: 1.2, life: 0.01 }));
+        // 领域：无量空处要现场画 1024² 的"情报"文字贴图（900 次 fillText），单独占一帧
+        push("voidDomain", () => api.voidDomain({ pos: P.clone(), life: 0.01 }));
+        push("shrineDomain", () => api.shrineDomain({ pos: P2.clone(), life: 0.01 }));
+        // 领域对撞（两个领域同时展开时才有）—— 实测第一次触发 670ms，必须预热
+        push("domainClash", () => api.domainClash({ voidPos: P.clone(), shrinePos: P2.clone(), tug: () => 0, life: 0.2 }));
+      },
+      /** 调试：每个预热件的耗时（ms）+ 队列剩余 */
+      get warmReport() {
+        return { queue: warmQueue.length, jobs: Object.assign({}, warmDebug) };
       },
       /* ---- 五条悟 ---- */
       blue(o) {
@@ -48752,16 +49096,28 @@ void main(){
      */
     const dbg = { mv: 0, want: 0, wantAnim: "", cd: 0, blocked: 0, sp: 0, gaitIn: 0 };
     let cmdAge = 0;                // 连续多少次更新没有收到移动指令
+    let curHold = false;           // 本次动作播完是否要保持末帧（受击硬直等）
     let turnVel = 0;               // 转身角速度 rad/s
     let leanRoll = 0;              // 转弯侧倾
     let leanPitch = 0;             // 加减速前后倾
+    // 受击让位：上身朝被打的那一侧让开并后仰，攻击方的拳头就不会"插进"躯干里
+    let yieldRoll = 0;
+    let yieldPitch = 0;
     /* 姿态交叉淡入：切换动作时从"上一帧真正贴上去的姿态"过渡到新动作，
      * 不再是一帧硬切（原先 run→punch 单帧跳变 2.54 弧度） */
     const appliedPose = {};
     for (const bb of BONES) appliedPose[bb] = [0, 0, 0];
+    // 本帧"目标姿态"的副本：用来判断过渡是否真的收敛到目标
+    const rawPose = {};
+    for (const bb of BONES) rawPose[bb] = [0, 0, 0];
     let appliedRootY = 0;
     let blendT = 1;
     let blendDur = 0.18;
+    let blending = false;   // 是否正在过渡（结束条件是"收敛"而不是"计时到"）
+    let blendTime = 0;
+    let blendSteps = 0;     // 过渡经过了多少次 update（兜底：dt 异常时也能保证收敛）
+    let lastDt = 0;         // 最近一次 update 的 dt（诊断用）
+    let stepPeak = 0;       // 自上次 play 起，单次 update 内骨骼最大变化量（弧度）
     const setFlash = (v) => {
       flash = clamp5(v, 0, 1);
       for (const m of toonMats) m.uniforms.uFlash.value = flash;
@@ -48790,6 +49146,7 @@ void main(){
     };
     const update2 = (dt) => {
       const d = Math.min(Math.max(dt || 0, 0), 0.1);
+      lastDt = d;
       tGlobal += d;
       state2.animT = curT;
       const clip = sampler.get(curName);
@@ -48822,38 +49179,61 @@ void main(){
           // 攻击 / 技能 / 受击的调用方经常直接 return（不等 onEnd），
           // 缺了这一步角色就会一直卡在出拳或受击的最后一帧：
           // 表现为"打完之后僵住不动""移动时腿不摆动像个木偶"。
-          if (curName === finishedName && !HOLD_AFTER_END[curName]) {
+          if (curName === finishedName && !curHold && !HOLD_AFTER_END[curName]) {
             play2("idle", { loop: true });
           }
         }
       }
       if (!sampler.sample(curName, curT, poseBuf)) return;
       // ---- 交叉淡入：从切换瞬间的姿态平滑过渡到新动作 ----
-      if (blendT < 1) {
+      if (blending) {
+        // 先留一份"目标姿态"副本，供收敛判定用（否则会被下面的混合覆盖掉）
+        for (const b of BONES) {
+          const r = rawPose[b], o = poseBuf[b];
+          r[0] = o[0]; r[1] = o[1]; r[2] = o[2];
+        }
+        const rawRootY = poseBuf.__rootY;
         blendT = Math.min(1, blendT + d / blendDur);
+        blendTime += d;
+        blendSteps++;
         // 用 smoothstep 而不是 easeOut：easeOut 第一帧就吃掉 40%，
         // 那一帧本身就是一次大跳变（实测 1.0 弧度），smoothstep 首帧只走 7%
         const bk = blendT * blendT * (3 - 2 * blendT);
+        let maxDiff = 0;
         for (const b of BONES) {
-          const o = poseBuf[b], p = appliedPose[b];
-          o[0] = p[0] + (o[0] - p[0]) * bk;
-          o[1] = p[1] + (o[1] - p[1]) * bk;
-          o[2] = p[2] + (o[2] - p[2]) * bk;
-        }
-        poseBuf.__rootY = appliedRootY + (poseBuf.__rootY - appliedRootY) * bk;
-        // 过渡期间再加一道单帧限幅：掉帧时（一帧 50ms）也不会"啪"一下跳半个动作
-        for (const b of BONES) {
-          const o = poseBuf[b], p = appliedPose[b];
+          const o = poseBuf[b], p = appliedPose[b], r = rawPose[b];
           for (let i = 0; i < 3; i++) {
-            const dd = o[i] - p[i];
-            if (dd > 0.6) o[i] = p[i] + 0.6;
-            else if (dd < -0.6) o[i] = p[i] - 0.6;
+            let w = p[i] + (o[i] - p[i]) * bk;
+            // 单帧限幅：掉帧时（一帧 50ms）也不会"啪"一下跳半个动作
+            const dd = w - p[i];
+            if (dd > 0.6) w = p[i] + 0.6;
+            else if (dd < -0.6) w = p[i] - 0.6;
+            o[i] = w;
+            const diff = Math.abs(w - r[i]);
+            if (diff > maxDiff) maxDiff = diff;
           }
         }
+        poseBuf.__rootY = appliedRootY + (poseBuf.__rootY - appliedRootY) * bk;
+        /**
+         * ⚠ 过渡的结束条件必须是"收敛到目标"，不能只看计时。
+         * 上一版是纯计时（blendT>=1 就结束），而单帧限幅 0.6rad 会让姿态落后于目标：
+         * 计时一到就不再混合，姿态**一帧内直接跳到目标** —— 实测 down→idle 那一帧跳 2.229 弧度
+         * （"受击后回 idle 会闪一下"就是这个）。
+         * 现在：姿态与目标的差 < 0.02 且计时到位才算结束，另加 0.6s 兜底。
+         */
+        // 三重结束条件：收敛 / 计时 / **步数**。
+        // 步数兜底是必须的：如果 dt 异常为 0（暂停、掉帧、固定步长累加器给 0），
+        // 计时永远攒不满，blending 会一直为真 —— 60 秒压测里抓到过 4~5 秒的窗口。
+        if ((blendT >= 1 && maxDiff < 0.02) || blendTime > 0.6 || blendSteps > 60) blending = false;
       }
       for (const b of BONES) {
         const node = bones[b];
         const v = poseBuf[b];
+        const p = appliedPose[b];
+        for (let i = 0; i < 3; i++) {
+          const st = Math.abs(v[i] - p[i]);
+          if (st > stepPeak) stepPeak = st;
+        }
         node.rotation.set(v[0], v[1], v[2]);
       }
       bones.hips.position.y = hipsRestY + poseBuf.__rootY;
@@ -48867,15 +49247,40 @@ void main(){
         bones.core.rotation.x += leanPitch;
         bones.hips.rotation.x += leanPitch * 0.35;
       }
+      // ---- 受击让位：快速衰减的让身（比受击动画更快收，只负责头几帧的"躲"）----
+      if (Math.abs(yieldRoll) > 1e-3 || yieldPitch > 1e-3) {
+        const dec = Math.max(0, 1 - d * 6);
+        yieldRoll *= dec;
+        yieldPitch *= dec;
+        bones.core.rotation.z += yieldRoll;
+        bones.core.rotation.x -= yieldPitch;
+        bones.chest.rotation.x -= yieldPitch * 0.5;
+        bones.hips.rotation.z += yieldRoll * 0.4;
+      }
       if (q.secondary) {
         const breath = Math.sin(tGlobal * 1.75) * 0.026;
-        const sway = Math.sin(tGlobal * 0.62) * 0.02;
-        const sway2 = Math.cos(tGlobal * 0.48) * 0.016;
+        // ---- 待机重心微动：站立时重心在两腿之间缓慢转移 ----
+        // 原来原地站着时骨盆是**完全静止**的（实测 hips 位移范围 0），像雕塑。
+        // 幅度按"角色只占屏高 16%"给：骨盆倾 2.6°、旋转 1.7°，配合呼吸让轮廓一直在微动。
+        const spIdle = Math.hypot(vX, vZ);
+        const idleK = clamp5(1 - spIdle / 1.2, 0, 1);   // 走起来就交给行走层
+        const w1 = Math.sin(tGlobal * 0.62);
+        const w2 = Math.sin(tGlobal * 0.41 + 1.1);
         bones.chest.rotation.x += breath;
-        bones.core.rotation.z += sway;
-        bones.hips.rotation.z += sway2;
+        bones.hips.rotation.z += w1 * 0.045 * idleK;
+        bones.hips.rotation.y += w2 * 0.03 * idleK;
+        bones.hips.position.y -= (0.5 - 0.5 * Math.cos(tGlobal * 1.24)) * 0.008 * idleK;
+        bones.core.rotation.z -= w1 * 0.024 * idleK;   // 上身反向：形成跨部支撑的重心转移
+        bones.core.rotation.x += Math.sin(tGlobal * 0.83) * 0.012 * idleK;
+        bones.chest.rotation.z -= w1 * 0.014 * idleK;
+        bones.hips.rotation.z += Math.cos(tGlobal * 0.48) * 0.016;
         bones.neck.rotation.y += Math.sin(tGlobal * 0.37 + 1.1) * 0.05;
-        bones.head.rotation.z += Math.sin(tGlobal * 0.9) * 0.02;
+        bones.head.rotation.z += Math.sin(tGlobal * 0.9) * 0.02 + w1 * 0.022 * idleK;
+        // 膝关节随重心转移做一点点屈伸（腿在"撑住"身体，不是两根棍）
+        bones.shinL.rotation.x -= (0.5 - 0.5 * Math.cos(tGlobal * 0.62)) * 0.05 * idleK;
+        bones.shinR.rotation.x -= (0.5 + 0.5 * Math.cos(tGlobal * 0.62)) * 0.05 * idleK;
+        bones.thighL.rotation.x += (0.5 - 0.5 * Math.cos(tGlobal * 0.62)) * 0.03 * idleK;
+        bones.thighR.rotation.x += (0.5 + 0.5 * Math.cos(tGlobal * 0.62)) * 0.03 * idleK;
         // ---- 程序化行走层：让"走"是全身的事，而不是上半身刚体平移 ----
         {
           const spNow = Math.hypot(vX, vZ);
@@ -49037,13 +49442,32 @@ void main(){
         curSpeed = (opt.speed !== void 0 ? opt.speed : 1) * animSpeed(name);
         return;
       }
+      /**
+       * ⚠ 还有一种"重复请求"会致命：调用方用 loop:false 去请求一个正在循环的动作
+       *（典型写法：每帧 play("idle", { loop: false })）。
+       * 上面的早退条件要求 loop3===true，于是这种请求每帧都会走到下面把
+       * curT / blendT / blending 全部清零 —— 姿态永远停在过渡的起点不动。
+       * 60 秒随机输入压测实测：blending 连续为 1 达 5.3 秒（name 还是 idle），
+       * 表现就是"站着不动却一直在抖/僵"。
+       * 处理：循环类动作（非 ONESHOT）收到"降级为一次性"的重复请求时直接忽略。
+       * 真正的一次性动作（punch / hit_* 等）不受影响，仍然可以连续重触发。
+       */
+      if (name === curName && curLoop && !loop3 && !ONESHOT[name]) {
+        curSpeed = (opt.speed !== void 0 ? opt.speed : 1) * animSpeed(name);
+        return;
+      }
       // 攻击起手要快、位移动作可以柔一点：淡入时长按动作类型给
       blendT = 0;
-      blendDur = ONESHOT[name] ? 0.16 : (name === "walk" || name === "run" || name === "idle" ? 0.2 : 0.16);
+      blending = true;
+      blendTime = 0;
+      blendSteps = 0;
+      stepPeak = 0;
+      blendDur = ONESHOT[name] ? 0.16 : (name === "walk" || name === "run" ? 0.15 : name === "idle" ? 0.2 : 0.16);
       curName = name;
       curT = 0;
       ended = false;
       curLoop = loop3;
+      curHold = !!opt.hold;
       curSpeed = (opt.speed !== void 0 ? opt.speed : 1) * animSpeed(name);
       onEndCb = typeof opt.onEnd === "function" ? opt.onEnd : null;
       state2.anim = name;
@@ -49109,7 +49533,7 @@ void main(){
       // 一次性动作已经播完（且不是需要保持末帧的姿势）时也要允许接管，
       // 否则 move() 会因为 curName 仍是 punch/hit_light 而拒绝切回走跑，
       // 于是"边走边滑、腿一步不摆"。
-      const oneShotDone = !curLoop && ended && !HOLD_AFTER_END[curName];
+      const oneShotDone = !curLoop && ended && !curHold && !HOLD_AFTER_END[curName];
       // 循环中的"非步态"动作（防御姿势、蓄力等）也应该能被走跑接管，
       // 否则只要有一个循环动作没人负责收尾，角色就会一边滑一边保持那个姿势。
       // HOLD_LOOP 里的动作是真正需要玩家保持姿势的，不抢。
@@ -49147,7 +49571,16 @@ void main(){
         dbg.gaitIn = inGait ? 1 : 0;
         if (wantAnim !== curName && (!inGait || gaitCd <= 0)) {
           play2(wantAnim, { loop: true });
-          gaitCd = 0.12;
+          /**
+           * ⚠ 冷却时长要分情况：
+           * walk↔run 之间来回抖的代价很大 —— 每次 play2 都会把 blendT 归零，
+           * 抖两次就永远收敛不了（60 秒压测实测：切到 walk 后 blend 用了 1183ms 才到 1，
+           * 期间姿态一直挂在半路上 = "动作僵硬"）。
+           * 而"进/出 idle"必须干脆，否则角色会以站姿在地面上滑行。
+           * 所以：步态之间 0.34s（> 交叉淡入 0.2s，保证每次都过渡完），跨界 0.12s。
+           */
+          const bothLoco = (curName === "walk" || curName === "run") && (wantAnim === "walk" || wantAnim === "run");
+          gaitCd = bothLoco ? 0.34 : 0.12;
         } else if (wantAnim !== curName) {
           dbg.blocked++;
         }
@@ -49166,6 +49599,13 @@ void main(){
           tmpV.normalize().multiplyScalar(2.4 * a);
           knock.x += tmpV.x;
           knock.z += tmpV.z;
+          // 受击侧（角色本地左右）决定上身往哪边让
+          const ly = root.rotation.y;
+          const lx = Math.cos(-ly) * tmpV.x - Math.sin(-ly) * tmpV.z;
+          const base = clamp5(2.4 * a, 0, 4.8);
+          const side = lx >= 0 ? -1 : 1;
+          yieldRoll = side * 0.16 * (base / 2.4);
+          yieldPitch = 0.2 * (base / 2.4);
         }
       }
     };
@@ -49216,6 +49656,7 @@ void main(){
       curT = 0;
       ended = false;
       curLoop = true;
+      curHold = false;
       curSpeed = animSpeed("idle");
       onEndCb = null;
       state2.anim = "idle";
@@ -49228,7 +49669,11 @@ void main(){
       targetYaw = null;
       vX = 0; vZ = 0; prevSpd = 0; cmdMove = false;
       turnVel = 0; leanRoll = 0; leanPitch = 0;
+      yieldRoll = 0; yieldPitch = 0;
       blendT = 1;
+      blending = false;
+      blendTime = 0;
+      blendSteps = 0;
       for (const b of BONES) { const a = appliedPose[b]; a[0] = 0; a[1] = 0; a[2] = 0; }
       appliedRootY = 0;
       root.position.set(0, 0, 0);
@@ -49310,7 +49755,9 @@ void main(){
       // 只读诊断出口：动作状态是闭包变量，外部脚本看不到，排查时全靠这个
       dbg: {
         get: () => ({
-          name: curName, loop: curLoop, ended, t: +curT.toFixed(3), blend: +blendT.toFixed(2),
+          name: curName, loop: curLoop, ended, hold: curHold, t: +curT.toFixed(3), blend: +blendT.toFixed(2),
+          blending: blending ? 1 : 0, blendTime: +blendTime.toFixed(3), blendSteps, dt: +lastDt.toFixed(4),
+          stepPeak: +stepPeak.toFixed(3),
           mv: dbg.mv, want: +dbg.want.toFixed(2), wantAnim: dbg.wantAnim,
           cd: +dbg.cd.toFixed(3), blocked: dbg.blocked, sp: +dbg.sp.toFixed(2), gaitIn: dbg.gaitIn
         }),
@@ -50532,7 +50979,14 @@ void main(){
       this.combat.onActionEnd(a);
     }
   };
-  var CAPSULE_R = 0.55;
+  /**
+   * 角色碰撞胶囊半径。
+   * art-fighters 逐网格量过：躯干/头部在中心距 0.35~0.40m 才真正接触，0.55 时躯干间隙还有 0.22m；
+   * 但**四肢（脚/小腿）在 0.65~0.70m 就先碰到了** —— 玩家在屏幕上看到的"贴身穿插"其实是脚对脚。
+   * 提到 0.72 之后躯干与四肢都有间隙；命中距离实测约 1.7m，而 melee 判定是 hitR(1.05)+0.72=1.77m，
+   * 仍然打得到，贴身连段不受影响（已用 40 秒真实对局复测命中数）。
+   */
+  var CAPSULE_R = 0.72;
   var BODY_LOW = 0.35;
   var BODY_TOP_PAD = 0.3;
   var _sa = new Vector3();
@@ -50691,6 +51145,14 @@ void main(){
         victim.guarding = false;
         victim.ctrl.setGuard(false);
         cb.runner.cancel(victim.side, "hit");
+        /**
+         * 硬直期间必须保持受击姿势。
+         * 原来受击动作是一次性的，播完就自动回 idle，可硬直还在（最多 0.46s，被连击时更长），
+         * 这段时间角色会**以 idle 站姿高速平移出去** —— 模糊测试抓到的就是这种滑行。
+         * hold:true 让受击姿势停在末帧，等 stunT 归零后再由下面的逻辑放回 idle。
+         */
+        playAnim(victim.ctrl, heavy ? "hit_heavy" : "hit_light", { hold: true });
+        victim.stunHeld = true;
       }
       if (h.kb) victim.knockback(dir, h.kb * (heavy ? 1 : 0.35));
       if (victim.side === SIDE.SUKUNA && cb.sukunaPhase() >= 3 && attacker && attacker.side === SIDE.GOJO && h.kind !== "domain") {
@@ -51886,6 +52348,14 @@ void main(){
         const c = cb.fighters[side];
         c.tick(d);
         if (c.vel.lengthSq() > 1e-4) cb.resolver.wallSmash(c, Math.hypot(c.vel.x, c.vel.z));
+        // 硬直结束：把停在末帧的受击姿势放回待机，否则角色会一直保持着挨打的那个定格
+        if (c.stunHeld && c.stunT <= 0) {
+          c.stunHeld = false;
+          const nm = c.ctrl.dbg ? c.ctrl.dbg.name : "";
+          if (nm === "hit_light" || nm === "hit_heavy" || nm === "knockback" || nm === "down") {
+            playAnim(c.ctrl, "idle", { loop: true });
+          }
+        }
         c.syncState(c.moveIntent.lengthSq() > 0.01);
         /**
          * ⚠ 这里**不能再调 c.ctrl.update(d)**：main.js 的主循环在 combat.update() 之后
@@ -51897,6 +52367,16 @@ void main(){
          * 统一交给 main.js 的 gojo/sukuna.update 更新，一帧一次。
          */
         c.p.copy(c.ctrl.getPos());
+        /**
+         * 角色 vs 建筑：把角色推出建筑足迹。
+         * 之前全项目没有任何"角色 vs 建筑"的移动解算（BuildingGrid 只用于撞墙伤害与 AI 掩体），
+         * 玩家可以一路走进楼里 —— 实测从马路直走 9 秒，与最近楼边的距离从 +3.08m 走到 -6.29m。
+         * city.pushOut 用 AABB 最近点推挤，能贴墙走、不误推（world-city 已在 city.js 侧仿真验证）。
+         */
+        if (city2 && typeof city2.pushOut === "function" && c.p && city2.pushOut(c.p, CAPSULE_R) > 0) {
+          const at = c.ctrl.getPos();
+          c.ctrl.setPos(c.p.x, at.y, c.p.z);
+        }
         if (c.infinityT <= 0 && c.infHandle) {
           if (c.infHandle.kill) c.infHandle.kill();
           c.infHandle = null;
@@ -53408,6 +53888,10 @@ uniform vec2  uTexel;
 uniform float uTime;
 uniform float uBloom;      // 泛光强度（已在上层做过上限）
 uniform float uBloomCap;   // 单像素泛光贡献上限
+uniform float uBloomFloor; // 泛光高通地板：扣掉"大面积亮部"的低频分量
+uniform sampler2D tHaze;   // 1/16 分辨率的邻域平均亮度：判"周围有多大一片亮"
+uniform float uHazeK;      // 大面积亮部压制强度
+uniform float uHazeKnee;   // 开始压制的邻域亮度门槛
 uniform float uFlash;      // 闪光强度
 uniform vec3  uFlashColor;
 uniform float uFlashTone;  // 闪光「亮度自适应」系数
@@ -53447,11 +53931,31 @@ void main() {
   base *= 1.0 + uRadial * ( 0.85 * ring * ring );
   base = mix( base, base * 0.72, clamp( uRadial * 0.55, 0.0, 0.6 ) * clamp( cd, 0.0, 1.0 ) );
 
-  /* --- 泛光叠加：加法但每像素封顶 ---
+  /* --- 泛光叠加：高通化 + 每像素封顶 ---
    * 泛光只负责「亮的东西往四周溢一点」，绝不能把整片的暗部提亮成灰白。
-   * uBloomCap 把单像素的泛光贡献锁死，超过的部分直接丢掉。
+   *
+   * 【task-6 修复】旧版把模糊结果直接乘强度加上去 —— 模糊结果里天然含有
+   * 「大面积亮部的低频分量」。沿街机位下几十个街灯的光锥叠成一片大面积暖色，
+   * 它的低频分量被原样加回画面，就成了糊掉画面中段的一片暖雾。
+   * 现在先减掉地板 uBloomFloor 再放大（高通）：**只保留局部凸起的光晕，
+   * 大面积均匀亮部的贡献被扣掉**；小而亮的核（火星/术式核心）不受影响。
    */
-  vec3 bloom = min( texture2D( tBloom, uv ).rgb * uBloom, vec3( uBloomCap ) );
+  vec3 bl = texture2D( tBloom, uv ).rgb;
+  bl = max( bl - vec3( uBloomFloor ), vec3( 0.0 ) ) / max( 1e-3, 1.0 - uBloomFloor );
+  vec3 bloom = min( bl * uBloom, vec3( uBloomCap ) );
+
+  /* --- 大面积亮部压制（task-6 核心修复）---
+   * tHaze 是场景在 1/16 分辨率下的邻域平均：它高 = 这块地方"一大片都亮"。
+   * 对这样的区域做一次轻度的局部色调映射把底板压下去，而局部对比（细节）不受影响；
+   * 单个亮点（火星、术式核心）邻域平均很低，完全不会被动到。
+   */
+  float haze = dot( texture2D( tHaze, uv ).rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+  float hazeAmt = clamp( uHazeK * max( 0.0, haze - uHazeKnee ), 0.0, 1.4 );
+  base *= 1.0 / ( 1.0 + hazeAmt );
+  // 大面积暖光同时轻微去色：不然整片橙黄会把画面的色彩空间占满，看着像蒙了一层滤镜
+  float baseLum = dot( base, vec3( 0.2126, 0.7152, 0.0722 ) );
+  base = mix( base, vec3( baseLum ), clamp( hazeAmt * 0.42, 0.0, 0.55 ) );
+
   vec3 col = base + bloom;
 
   /* --- 曝光保护：先量当前像素有多亮 --- */
@@ -53595,6 +54099,25 @@ void main() {
     blurV.needsSwap = false;
     blurH.clear = false;
     blurV.clear = false;
+    /* --- 大面积亮部侦测（task-6）---
+     * 街灯体积光锥叠在一起时，画面中段会变成一大片暖色，而它的亮度可能低于泛光阈值，
+     * 所以"泛光高通"压不掉它（实测 bloom on/off 的中段亮度只差 0.2/89）。
+     * 这里额外做一路 1/16 分辨率的极低分辨率模糊：得到每个像素"周围有多大一片亮"，
+     * 交给合成 pass 做局部色调映射（大面积亮 → 压低，局部亮点不动）。
+     * 成本：2 个 1/16 分辨率的全屏 draw，桌面/手机都可忽略。
+     */
+    const hazeRT_A = new WebGLRenderTarget(1, 1, { type: rtType, depthBuffer: false, stencilBuffer: false });
+    const hazeRT_B = new WebGLRenderTarget(1, 1, { type: rtType, depthBuffer: false, stencilBuffer: false });
+    hazeRT_A.texture.name = "hazeA";
+    hazeRT_B.texture.name = "hazeB";
+    hazeRT_A.texture.generateMipmaps = false;
+    hazeRT_B.texture.generateMipmaps = false;
+    const hazeH = makeBlur(new Vector2(1, 0));
+    const hazeV = makeBlur(new Vector2(0, 1));
+    hazeH.needsSwap = false;
+    hazeV.needsSwap = false;
+    hazeH.clear = false;
+    hazeV.clear = false;
     const composite = new ShaderPass({
       uniforms: {
         tDiffuse: { value: null },
@@ -53603,6 +54126,10 @@ void main() {
         uTime: { value: 0 },
         uBloom: { value: 0.5 },
         uBloomCap: { value: 0.65 },
+        uBloomFloor: { value: 0.14 },
+        tHaze: { value: null },
+        uHazeK: { value: 12 },
+        uHazeKnee: { value: 0.04 },
         uFlash: { value: 0 },
         uFlashColor: { value: new Color(1, 1, 1) },
         uFlashTone: { value: 0.6 },
@@ -53642,13 +54169,18 @@ void main() {
       // 取两者之间：整体抬一档但保住暗部层次，blownPct 保持 0。
       // 用户反馈"打击被压平"后重新配比：抬亮度主要靠线性增益（保住黑位与对比），
       // 少用 gamma 抬中间调 —— gamma 才是"画面被抬平"的元凶。
-      high: { blurRadius: 1.3, bloom: 0.62, bloomCap: 0.8, grain: 0.03, chromaBase: 2.8, vignette: 0.58, shoulder: 0.8, knee: 0.9, ceil: 2.6, exposure: 1.3, lift: 0.0008, gamma: 0.935 },
-      medium: { blurRadius: 1.1, bloom: 0.52, bloomCap: 0.68, grain: 0.022, chromaBase: 2.2, vignette: 0.56, shoulder: 0.85, knee: 0.85, ceil: 2.4, exposure: 1.28, lift: 0.0008, gamma: 0.94 },
-      low: { blurRadius: 0.9, bloom: 0.4, bloomCap: 0.55, grain: 0, chromaBase: 1.6, vignette: 0.54, shoulder: 0.95, knee: 0.8, ceil: 2.2, exposure: 1.25, lift: 0.0008, gamma: 0.945 }
+      // task-6：泛光加高通地板（bloomFloor），半径小幅收紧 —— 只让"小而亮"的东西发光，
+      // 大面积亮部（沿街的街灯光锥）不再糊成一片暖雾。
+      high: { hazeK: 12, hazeKnee: 0.04, blurRadius: 1.15, bloom: 0.62, bloomCap: 0.8, bloomFloor: 0.14, grain: 0.03, chromaBase: 2.8, vignette: 0.58, shoulder: 0.8, knee: 0.9, ceil: 2.6, exposure: 1.3, lift: 0.0008, gamma: 0.935 },
+      medium: { hazeK: 11, hazeKnee: 0.045, blurRadius: 1.0, bloom: 0.52, bloomCap: 0.68, bloomFloor: 0.16, grain: 0.022, chromaBase: 2.2, vignette: 0.56, shoulder: 0.85, knee: 0.85, ceil: 2.4, exposure: 1.28, lift: 0.0008, gamma: 0.94 },
+      low: { hazeK: 10, hazeKnee: 0.05, blurRadius: 0.85, bloom: 0.4, bloomCap: 0.55, bloomFloor: 0.18, grain: 0, chromaBase: 1.6, vignette: 0.54, shoulder: 0.95, knee: 0.8, ceil: 2.2, exposure: 1.25, lift: 0.0008, gamma: 0.945 }
     };
     let Q = TIERS[quality2];
     composite.uniforms.uBloom.value = Q.bloom;
     composite.uniforms.uBloomCap.value = Q.bloomCap;
+    composite.uniforms.uBloomFloor.value = Q.bloomFloor;
+    composite.uniforms.uHazeK.value = Q.hazeK;
+    composite.uniforms.uHazeKnee.value = Q.hazeKnee;
     composite.uniforms.uGrain.value = Q.grain;
     composite.uniforms.uVignette.value = Q.vignette;
     composite.uniforms.uKnee.value = Q.knee;
@@ -53689,6 +54221,14 @@ void main() {
       const bh = Math.max(1, Math.floor(h * pr * 0.5));
       blurRT_A.setSize(bw, bh);
       blurRT_B.setSize(bw, bh);
+      const hw = Math.max(1, Math.floor(w * pr / 16));
+      const hh = Math.max(1, Math.floor(h * pr / 16));
+      hazeRT_A.setSize(hw, hh);
+      hazeRT_B.setSize(hw, hh);
+      hazeH.uniforms.uTexel.value.set(1 / hw, 1 / hh);
+      hazeV.uniforms.uTexel.value.set(1 / hw, 1 / hh);
+      hazeH.uniforms.uRadius.value = 1.6;
+      hazeV.uniforms.uRadius.value = 1.6;
       blurH.uniforms.uTexel.value.set(1 / bw, 1 / bh);
       blurV.uniforms.uTexel.value.set(1 / bw, 1 / bh);
       blurH.uniforms.uRadius.value = Q.blurRadius;
@@ -53811,6 +54351,16 @@ void main() {
         gl.clear();
         blurV.fsQuad.render(gl);
       }
+      // 大面积亮部侦测：1/16 分辨率的双向模糊（只跑两个很小的 draw）
+      hazeH.uniforms.tDiffuse.value = rb.texture;
+      gl.setRenderTarget(hazeRT_A);
+      gl.clear();
+      hazeH.fsQuad.render(gl);
+      hazeV.uniforms.tDiffuse.value = hazeRT_A.texture;
+      gl.setRenderTarget(hazeRT_B);
+      gl.clear();
+      hazeV.fsQuad.render(gl);
+      composite.uniforms.tHaze.value = hazeRT_B.texture;
       composite.uniforms.tBloom.value = blurRT_A.texture;
       // 保护直出时合成里不再叠闪光（否则和 DOM 闪光叠成两倍）
       const wantFlash = usePost && flashToPost;
@@ -53822,6 +54372,9 @@ void main() {
       const key = q === "low" || q === "medium" ? q : "high";
       Q = TIERS[key];
       composite.uniforms.uBloomCap.value = Q.bloomCap;
+      composite.uniforms.uBloomFloor.value = Q.bloomFloor;
+      composite.uniforms.uHazeK.value = Q.hazeK;
+      composite.uniforms.uHazeKnee.value = Q.hazeKnee;
       composite.uniforms.uGrain.value = Q.grain;
       composite.uniforms.uVignette.value = Q.vignette;
       composite.uniforms.uKnee.value = Q.knee;
@@ -53843,6 +54396,10 @@ void main() {
       outputPass.dispose?.();
       blurRT_A.dispose();
       blurRT_B.dispose();
+      hazeRT_A.dispose();
+      hazeRT_B.dispose();
+      hazeH.dispose?.();
+      hazeV.dispose?.();
       renderer.dispose();
     }
     resize(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1);
@@ -53889,6 +54446,9 @@ void main() {
           ceil: composite.uniforms.uCeil.value,
           bloom: +composite.uniforms.uBloom.value.toFixed(3),
           bloomCap: composite.uniforms.uBloomCap.value,
+          bloomFloor: composite.uniforms.uBloomFloor.value,
+          hazeK: composite.uniforms.uHazeK.value,
+          hazeKnee: composite.uniforms.uHazeKnee.value,
           bloomThreshold: brightPass.uniforms.uThreshold.value,
           exposure: composite.uniforms.uExposure.value,
           lift: composite.uniforms.uLift.value,
@@ -54295,7 +54855,7 @@ void main() {
     });
     step("预热");
     await yieldFrame();
-    warmUp();
+    await warmUp();
     camInit();
     applyResize();
     window.addEventListener("resize", applyResize);
@@ -54306,15 +54866,50 @@ void main() {
       window.__BOOT.step = "完成";
     }
     gotoTitle();
+    warmIdle();
     requestAnimationFrame(loop2);
   }
-  function warmUp() {
+  /**
+   * 生成期预热。
+   * ⚠ 必须**分帧**：三连同步渲染会把 47 个 program 的链接检查挤在同一帧里，
+   * 实测这一步独占 631ms，是启动期最大的单个长任务（mobile-ship 的 CPU 采样归因：
+   * onFirstUse 56% + getExtension 27%，着色器编译本身 0ms，全卡在 three 同步等 LINK_STATUS）。
+   * 拆成三次渲染 + 每帧让出，长任务就散成三个 ~200ms 的小块，首屏不再有一次明显顿住。
+   * 此时 loading 遮罩还没摘，玩家看不到中间帧。
+   */
+  async function warmUp() {
     try {
       applyResize();
-      for (let i = 0; i < 3; i++) render.render(scene, godCam, 1 / 60);
+      for (let i = 0; i < 3; i++) {
+        render.render(scene, godCam, 1 / 60);
+        await new Promise(function (r) { requestAnimationFrame(function () { r(); }); });
+      }
     } catch (e) {
       console.warn("warmup failed", e);
     }
+  }
+  /**
+   * 空闲预热：大字贴图 / 领域贴图这类几百 KB 的 canvas 纹理，
+   * 首次创建要 20~130ms。它们不该卡在战斗高潮那一帧上
+   * （实测领域对撞那一帧 fx.callout 就吃掉 20ms，整帧 111ms）。
+   * 这里在标题界面用 requestIdleCallback 一件一件做，每件之间让出一帧，
+   * 既不会拉长启动长任务，也不会和玩家的第一次操作抢时间。
+   */
+  var warmQueue = null;
+  function warmIdle() {
+    if (warmQueue) return;
+    warmQueue = [
+      () => { if (fx && fx.warmCommonCues) fx.warmCommonCues(); },
+      () => { if (weapons && weapons.warmup) weapons.warmup(); }
+    ];
+    const idle = window.requestIdleCallback || function (fn) { return setTimeout(fn, 60); };
+    const step = function () {
+      if (!warmQueue || !warmQueue.length) { warmQueue = null; return; }
+      const job = warmQueue.shift();
+      try { job(); } catch (e) { console.info("[新宿决战] 预热跳过:", e && e.message); }
+      idle(step, { timeout: 2000 });
+    };
+    idle(step, { timeout: 2000 });
   }
   function applyResize() {
     const w = window.innerWidth, h = window.innerHeight;
@@ -55115,6 +55710,7 @@ var MOBILE = (function () {
       fpsNow: +perf.fps.toFixed(1),
       dropped: perf.dropped,
       raised: perf.raised,
+      prewarm: { passes: prewarm.passes, quiet: prewarm.quiet, restored: prewarm.restored, composite: prewarm.composite, plain: prewarm.plain, err: prewarm.err, skipped: prewarm.skipped },
       dpr: env.dpr,
       vw: viewport().w,
       vh: viewport().h,
@@ -55160,6 +55756,78 @@ var MOBILE = (function () {
     } else {
       perfStable = 0;
     }
+  }
+
+  /* ==========================================================================
+     二点五、启动预热前置：把「1.2 秒着色器解析」长任务摊到主线程之外
+     ----------------------------------------------------------------------------
+     实测证据（task-10 两个探针）：
+       probe-mobile-longtask.mjs  → 启动期最大长任务 1210ms，正好落在 main.js 的
+         「预热」步骤（656ms→1866ms），旁边还有 265ms / 218ms / 100ms 三个。
+       probe-mobile-bootprofile.mjs → 对该窗口 CPU 采样：56% 自耗时在 three.js 的
+         onFirstUse（同步 getProgramParameter(LINK_STATUS)）、27% 在 getExtension。
+         也就是说主线程在干等 GPU 驱动链接 47 个 program，不是 JS 在算。
+     做法：loading 阶段就提前调 renderer.compileAsync()（three.js 官方 API，
+     用 KHR_parallel_shader_compile 每 10ms 轮询，不占主线程），并跟着场景增长补跑。
+     等 main.js 的 warmUp() 真正渲染时 program 已经链接完成，
+     getProgramParameter 立刻返回 —— 那个 1.2 秒冻屏消失。
+     不碰任何别人的源文件；拿不到 API 时静默跳过，行为完全退回原样。
+     ========================================================================== */
+  var prewarm = {
+    passes: 0, lastN: -1, lastT: 0, lastLabel: "", quiet: false, restored: false,
+    savedCheck: null, err: null, skipped: null, composite: 0, plain: 0,
+  };
+  var PREWARM_OFF = QS.get("prewarm") === "0";     // 出问题时可以 ?prewarm=0 一键关掉
+
+  /**
+   * 对照实验结论（_tools/probe-mobile-prewarm.mjs，同一台机器同一份产物）：
+   *   mode=none          预热步骤 1609ms（一个长任务吃满）
+   *   mode=async         提前 compileAsync：1527ms，基本没用（compile() 自己也会同步等链接）
+   *   mode=render        只分帧渲染：1651ms，更差
+   *   mode=renderquiet   分帧渲染 + 关掉 shader 诊断：**806ms**，最大长任务腰斩
+   * 原因是 three.js 的 WebGLProgram 在 checkShaderErrors=true 时会同步
+   * getProgramParameter(LINK_STATUS)，把驱动链接时间全算在主线程头上。
+   */
+  function prewarmTick() {
+    if (PREWARM_OFF) return;
+    var SS = window.__SS;
+    if (!SS || !SS.render || !SS.scene || !SS.godCam) return;
+    var r = SS.render.renderer;
+    if (!r || typeof r.render !== "function") { prewarm.skipped = "no renderer"; return; }
+    var st = gameState();
+    if (st !== "loading") {
+      // 载入一结束就把 three.js 的着色器诊断开关还回去，别影响后续排查
+      if (prewarm.quiet && !prewarm.restored) {
+        try { r.debug.checkShaderErrors = prewarm.savedCheck; } catch (e) { /* 忽略 */ }
+        prewarm.restored = true;
+        prewarm.quiet = false;
+      }
+      return;
+    }
+    var n = SS.scene.children.length;
+    if (n < 1) return;
+    // 载入步骤文案变化 = boot 又往场景里塞了新东西，这是最可靠的触发信号
+    // （只数 scene.children 会漏掉「往已有 group 里加内容」的那几步）
+    var stepEl = document.getElementById("loading-step");
+    var label = stepEl ? stepEl.textContent : "";
+    var now = nowMs();
+    var grew = n !== prewarm.lastN || label !== prewarm.lastLabel;
+    if (!grew && now - prewarm.lastT < 260) return;   // 没变化时兜底 260ms 补一帧
+    if (prewarm.passes >= 16) return;
+    prewarm.lastN = n; prewarm.lastLabel = label; prewarm.lastT = now; prewarm.passes++;
+    if (!prewarm.quiet && r.debug) {
+      prewarm.savedCheck = r.debug.checkShaderErrors;
+      r.debug.checkShaderErrors = false;
+      prewarm.quiet = true;
+    }
+    /**
+     * 用裸 renderer.render（与 main.js 的 warmUp 同一件事）。
+     * 实测：走完整后处理管线会让第一帧的峰值从 806ms 涨到 1023ms（多的那部分是
+     * bloom/composite 的 program），峰值更低才是这里的首要目标，所以选裸渲染；
+     * 后处理那几个 program 留给 main.js 的第一帧，代价是另一笔 265ms 的小任务。
+     */
+    try { r.render(SS.scene, SS.godCam); prewarm.plain++; }
+    catch (e) { prewarm.err = String(e); }
   }
 
   /* ==========================================================================
@@ -55256,7 +55924,8 @@ var MOBILE = (function () {
     joyEl = mk("div", "t-joy t-fade", host);
     joyEl.id = "t-joy";
     joyBase = mk("div", "t-joy-base", joyEl);
-    knobEl = mk("div", "t-joy-knob", joyEl);
+    // 旋钮放在底盘「内部」：几何上本来就是包含关系，父子里不该被算成重叠
+    knobEl = mk("div", "t-joy-knob", joyBase);
 
     actsEl = mk("div", "t-acts", host);
     actsEl.id = "t-acts";
@@ -55714,6 +56383,7 @@ var MOBILE = (function () {
   var tipShown = false;
   var dbg = { frames: 0, wantUI: null, state: null, isTouch: isTouch, host: false, lastErr: null };
 
+
   function syncUI(dt) {
     var st = gameState();
     var inFight = st === "fight" || st === "clash" || st === "victory" || st === "defeat";
@@ -55935,7 +56605,9 @@ var MOBILE = (function () {
       if (h.name.indexOf("fighter-panel") < 0 && h.name.indexOf("center-readout") < 0) return;
       topBottom = Math.max(topBottom, h.bottom);
     });
-    var zx0 = vp.w * 0.18, zx1 = vp.w * 0.82;
+    // 只统计「压到画面正中」的控件：真正的战斗区在中间三分之一，
+    // 贴边停靠的摇杆/技能栏/工具键（占右侧）不算侵占战场视野
+    var zx0 = vp.w / 3, zx1 = vp.w * 2 / 3;
     controls.forEach(function (c) {
       if (c.right < zx0 || c.x > zx1) return;
       if (c.y < vp.h * 0.3) return;
@@ -55995,6 +56667,7 @@ var MOBILE = (function () {
     var dt = (now - lastNow) / 1000;
     lastNow = now;
     if (dt > 0.5) dt = 0.5;      // 切后台回来别把统计带歪
+    try { prewarmTick(); } catch (e) { if (DEBUG) console.error("[mobile] prewarm", e); }
     if (!isTouch || !host) return;
     try { syncUI(dt); } catch (e) { dbg.lastErr = String(e && (e.stack || e.message) || e); if (DEBUG) console.error("[mobile] syncUI", e); }
   }

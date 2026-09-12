@@ -30,7 +30,14 @@ import { deflateSync } from 'node:zlib';
 const ROOT = process.cwd();
 const SRC = join(ROOT, 'src');
 const DIST = join(ROOT, 'dist');
-const SITE = join(DIST, 'site');
+/**
+ * --site-out <目录>：把站点产物写到别处（默认 dist/site）。
+ * 配合 --out 用，可以在不碰任何共享产物的前提下做一次完整私有构建：
+ *   node build/build.mjs --out tmp/me/dist.html --site-out tmp/me/site
+ * 多人并行时优先用这个，不必去抢 _tools/.buildlock。
+ */
+const siteOutIdx = process.argv.indexOf('--site-out');
+const SITE = siteOutIdx >= 0 && process.argv[siteOutIdx + 1] ? resolve(process.argv[siteOutIdx + 1]) : join(DIST, 'site');
 const SHELL = join(ROOT, 'deploy', 'site-shell');
 
 const read = (p) => readFileSync(p, 'utf8');

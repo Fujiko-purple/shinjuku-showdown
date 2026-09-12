@@ -395,7 +395,7 @@
     });
     step("预热");
     await yieldFrame();
-    warmUp();
+    await warmUp();
     camInit();
     applyResize();
     window.addEventListener("resize", applyResize);
@@ -406,15 +406,50 @@
       window.__BOOT.step = "完成";
     }
     gotoTitle();
+    warmIdle();
     requestAnimationFrame(loop2);
   }
-  function warmUp() {
+  /**
+   * 生成期预热。
+   * ⚠ 必须**分帧**：三连同步渲染会把 47 个 program 的链接检查挤在同一帧里，
+   * 实测这一步独占 631ms，是启动期最大的单个长任务（mobile-ship 的 CPU 采样归因：
+   * onFirstUse 56% + getExtension 27%，着色器编译本身 0ms，全卡在 three 同步等 LINK_STATUS）。
+   * 拆成三次渲染 + 每帧让出，长任务就散成三个 ~200ms 的小块，首屏不再有一次明显顿住。
+   * 此时 loading 遮罩还没摘，玩家看不到中间帧。
+   */
+  async function warmUp() {
     try {
       applyResize();
-      for (let i = 0; i < 3; i++) render.render(scene, godCam, 1 / 60);
+      for (let i = 0; i < 3; i++) {
+        render.render(scene, godCam, 1 / 60);
+        await new Promise(function (r) { requestAnimationFrame(function () { r(); }); });
+      }
     } catch (e) {
       console.warn("warmup failed", e);
     }
+  }
+  /**
+   * 空闲预热：大字贴图 / 领域贴图这类几百 KB 的 canvas 纹理，
+   * 首次创建要 20~130ms。它们不该卡在战斗高潮那一帧上
+   * （实测领域对撞那一帧 fx.callout 就吃掉 20ms，整帧 111ms）。
+   * 这里在标题界面用 requestIdleCallback 一件一件做，每件之间让出一帧，
+   * 既不会拉长启动长任务，也不会和玩家的第一次操作抢时间。
+   */
+  var warmQueue = null;
+  function warmIdle() {
+    if (warmQueue) return;
+    warmQueue = [
+      () => { if (fx && fx.warmCommonCues) fx.warmCommonCues(); },
+      () => { if (weapons && weapons.warmup) weapons.warmup(); }
+    ];
+    const idle = window.requestIdleCallback || function (fn) { return setTimeout(fn, 60); };
+    const step = function () {
+      if (!warmQueue || !warmQueue.length) { warmQueue = null; return; }
+      const job = warmQueue.shift();
+      try { job(); } catch (e) { console.info("[新宿决战] 预热跳过:", e && e.message); }
+      idle(step, { timeout: 2000 });
+    };
+    idle(step, { timeout: 2000 });
   }
   function applyResize() {
     const w = window.innerWidth, h = window.innerHeight;

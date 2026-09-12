@@ -1,0 +1,1424 @@
+{
+  "meshes": [
+    {
+      "name": "facade-ledges",
+      "count": 268,
+      "minY": 8.7,
+      "maxY": 37.76,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "debris",
+      "count": 240,
+      "minY": -0.49,
+      "maxY": 1.09,
+      "sunken": 0,
+      "deep": 189,
+      "floating": 0,
+      "samples": [
+        {
+          "i": 0,
+          "kind": "deepBase",
+          "y0": -0.23,
+          "x": 2.5,
+          "z": -183.2
+        },
+        {
+          "i": 1,
+          "kind": "deepBase",
+          "y0": -0.06,
+          "x": -56.6,
+          "z": 17.9
+        },
+        {
+          "i": 2,
+          "kind": "deepBase",
+          "y0": -0.19,
+          "x": -18.2,
+          "z": 20.8
+        },
+        {
+          "i": 3,
+          "kind": "deepBase",
+          "y0": -0.21,
+          "x": 0.3,
+          "z": 3.8
+        },
+        {
+          "i": 4,
+          "kind": "deepBase",
+          "y0": -0.2,
+          "x": -6.9,
+          "z": -5.1
+        },
+        {
+          "i": 5,
+          "kind": "deepBase",
+          "y0": -0.21,
+          "x": 7.9,
+          "z": -151.2
+        }
+      ]
+    },
+    {
+      "name": "sign-brackets",
+      "count": 235,
+      "minY": 9.27,
+      "maxY": 107.16,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 235,
+      "samples": [
+        {
+          "i": 0,
+          "kind": "float",
+          "y0": 34.47,
+          "x": 18,
+          "z": -30.1
+        },
+        {
+          "i": 1,
+          "kind": "float",
+          "y0": 25.99,
+          "x": 30.5,
+          "z": -18
+        },
+        {
+          "i": 2,
+          "kind": "float",
+          "y0": 11.71,
+          "x": 18,
+          "z": -26.6
+        },
+        {
+          "i": 3,
+          "kind": "float",
+          "y0": 13.17,
+          "x": 27.5,
+          "z": -18
+        },
+        {
+          "i": 4,
+          "kind": "float",
+          "y0": 11.83,
+          "x": 18,
+          "z": 35
+        },
+        {
+          "i": 5,
+          "kind": "float",
+          "y0": 20.03,
+          "x": -23.5,
+          "z": 18
+        }
+      ]
+    },
+    {
+      "name": "light-pools",
+      "count": 193,
+      "minY": 0.05,
+      "maxY": 0.27,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "facade-ac",
+      "count": 156,
+      "minY": 6.62,
+      "maxY": 33.42,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "shopfronts",
+      "count": 111,
+      "minY": 0,
+      "maxY": 5.4,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "shop-steps",
+      "count": 111,
+      "minY": 0,
+      "maxY": 0.28,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "roof-parapet",
+      "count": 92,
+      "minY": 13.82,
+      "maxY": 116.3,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "building-ao",
+      "count": 92,
+      "minY": 0.24,
+      "maxY": 0.24,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "facade-pipes",
+      "count": 74,
+      "minY": 0,
+      "maxY": 40.67,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "neon-v",
+      "count": 68,
+      "minY": 1.92,
+      "maxY": 68.03,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "guardrails",
+      "count": 66,
+      "minY": 0,
+      "maxY": 0.9,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "roof-vent",
+      "count": 65,
+      "minY": 14.22,
+      "maxY": 116.77,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "facade-bays",
+      "count": 61,
+      "minY": 7.89,
+      "maxY": 36.3,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "lamp-poles",
+      "count": 56,
+      "minY": 0,
+      "maxY": 8.2,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "lamp-shafts",
+      "count": 56,
+      "minY": 0.36,
+      "maxY": 7.96,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "road-patches",
+      "count": 53,
+      "minY": 0.02,
+      "maxY": 0.02,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "awnings",
+      "count": 52,
+      "minY": 5,
+      "maxY": 5.3,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "slabs",
+      "count": 48,
+      "minY": -0.33,
+      "maxY": 0.49,
+      "sunken": 0,
+      "deep": 35,
+      "floating": 0,
+      "samples": [
+        {
+          "i": 2,
+          "kind": "deepBase",
+          "y0": -0.14,
+          "x": -5.9,
+          "z": -5.9
+        },
+        {
+          "i": 3,
+          "kind": "deepBase",
+          "y0": -0.14,
+          "x": 18.6,
+          "z": -62.6
+        },
+        {
+          "i": 5,
+          "kind": "deepBase",
+          "y0": -0.16,
+          "x": 82.8,
+          "z": 17.9
+        },
+        {
+          "i": 6,
+          "kind": "deepBase",
+          "y0": -0.09,
+          "x": -16.2,
+          "z": 24.1
+        },
+        {
+          "i": 7,
+          "kind": "deepBase",
+          "y0": -0.06,
+          "x": -15.1,
+          "z": 23
+        },
+        {
+          "i": 8,
+          "kind": "deepBase",
+          "y0": -0.16,
+          "x": 168.5,
+          "z": -1.1
+        }
+      ]
+    },
+    {
+      "name": "skyline-mid",
+      "count": 44,
+      "minY": 0,
+      "maxY": 183.31,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "rebar",
+      "count": 40,
+      "minY": -0.35,
+      "maxY": 1.85,
+      "sunken": 0,
+      "deep": 9,
+      "floating": 11,
+      "samples": [
+        {
+          "i": 0,
+          "kind": "float",
+          "y0": 0.35,
+          "x": -20.3,
+          "z": 20.5
+        },
+        {
+          "i": 2,
+          "kind": "deepBase",
+          "y0": -0.06,
+          "x": 15.4,
+          "z": 20
+        },
+        {
+          "i": 8,
+          "kind": "float",
+          "y0": 0.38,
+          "x": 62.8,
+          "z": -15.7
+        },
+        {
+          "i": 11,
+          "kind": "float",
+          "y0": 0.43,
+          "x": -76.4,
+          "z": -19.5
+        },
+        {
+          "i": 13,
+          "kind": "float",
+          "y0": 0.51,
+          "x": 80,
+          "z": 17.1
+        },
+        {
+          "i": 14,
+          "kind": "float",
+          "y0": 0.35,
+          "x": -72.8,
+          "z": -18.1
+        }
+      ]
+    },
+    {
+      "name": "neon-h",
+      "count": 36,
+      "minY": 6.45,
+      "maxY": 104.59,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "car-tires",
+      "count": 36,
+      "minY": 0.01,
+      "maxY": 0.65,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "bollards",
+      "count": 32,
+      "minY": 0,
+      "maxY": 0.95,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "bodies-0",
+      "count": 31,
+      "minY": 0,
+      "maxY": 98.17,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "windows-0",
+      "count": 31,
+      "minY": 0,
+      "maxY": 98.17,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "bodies-1",
+      "count": 31,
+      "minY": 0,
+      "maxY": 115.8,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "windows-1",
+      "count": 31,
+      "minY": 0,
+      "maxY": 115.8,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "manholes",
+      "count": 31,
+      "minY": 0,
+      "maxY": 0.06,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "bodies-2",
+      "count": 30,
+      "minY": 0,
+      "maxY": 102.05,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "windows-2",
+      "count": 30,
+      "minY": 0,
+      "maxY": 102.05,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "skyline-far",
+      "count": 30,
+      "minY": 0,
+      "maxY": 239.62,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "roof-tank",
+      "count": 25,
+      "minY": 28.59,
+      "maxY": 117.11,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "crack-decals",
+      "count": 22,
+      "minY": 0.07,
+      "maxY": 0.07,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "clutter-box",
+      "count": 14,
+      "minY": 0.22,
+      "maxY": 1.27,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "roof-signs",
+      "count": 13,
+      "minY": 32.23,
+      "maxY": 99.7,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "signal-lens",
+      "count": 12,
+      "minY": 5.62,
+      "maxY": 6.18,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "clutter-bin",
+      "count": 10,
+      "minY": 0.22,
+      "maxY": 1.14,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "car-body",
+      "count": 9,
+      "minY": 0.42,
+      "maxY": 1.14,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 9,
+      "samples": [
+        {
+          "i": 0,
+          "kind": "float",
+          "y0": 0.42,
+          "x": 10.4,
+          "z": 36.5
+        },
+        {
+          "i": 1,
+          "kind": "float",
+          "y0": 0.42,
+          "x": 36.5,
+          "z": 10.4
+        },
+        {
+          "i": 2,
+          "kind": "float",
+          "y0": 0.42,
+          "x": 10.4,
+          "z": 54.2
+        },
+        {
+          "i": 3,
+          "kind": "float",
+          "y0": 0.42,
+          "x": 54.2,
+          "z": 10.4
+        },
+        {
+          "i": 4,
+          "kind": "float",
+          "y0": 0.42,
+          "x": 10.4,
+          "z": 80.3
+        },
+        {
+          "i": 5,
+          "kind": "float",
+          "y0": 0.42,
+          "x": 80.3,
+          "z": 10.4
+        }
+      ]
+    },
+    {
+      "name": "car-cabin",
+      "count": 9,
+      "minY": 1.14,
+      "maxY": 1.76,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 9,
+      "samples": [
+        {
+          "i": 0,
+          "kind": "float",
+          "y0": 1.14,
+          "x": 10.4,
+          "z": 36.2
+        },
+        {
+          "i": 1,
+          "kind": "float",
+          "y0": 1.14,
+          "x": 36.2,
+          "z": 10.4
+        },
+        {
+          "i": 2,
+          "kind": "float",
+          "y0": 1.14,
+          "x": 10.4,
+          "z": 54
+        },
+        {
+          "i": 3,
+          "kind": "float",
+          "y0": 1.14,
+          "x": 54,
+          "z": 10.4
+        },
+        {
+          "i": 4,
+          "kind": "float",
+          "y0": 1.14,
+          "x": 10.4,
+          "z": 80.1
+        },
+        {
+          "i": 5,
+          "kind": "float",
+          "y0": 1.14,
+          "x": 80.1,
+          "z": 10.4
+        }
+      ]
+    },
+    {
+      "name": "curbs",
+      "count": 8,
+      "minY": 0,
+      "maxY": 0.26,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "roof-mast",
+      "count": 8,
+      "minY": 38.86,
+      "maxY": 121.74,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "signal-heads",
+      "count": 8,
+      "minY": 2.76,
+      "maxY": 6.15,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 8,
+      "samples": [
+        {
+          "i": 0,
+          "kind": "float",
+          "y0": 5.65,
+          "x": 12.4,
+          "z": -13.9
+        },
+        {
+          "i": 1,
+          "kind": "float",
+          "y0": 5.65,
+          "x": -12.4,
+          "z": 13.9
+        },
+        {
+          "i": 2,
+          "kind": "float",
+          "y0": 5.65,
+          "x": 13.9,
+          "z": 12.4
+        },
+        {
+          "i": 3,
+          "kind": "float",
+          "y0": 5.65,
+          "x": -13.9,
+          "z": -12.4
+        },
+        {
+          "i": 4,
+          "kind": "float",
+          "y0": 2.76,
+          "x": 13.7,
+          "z": -13.7
+        },
+        {
+          "i": 5,
+          "kind": "float",
+          "y0": 2.76,
+          "x": -13.7,
+          "z": 13.7
+        }
+      ]
+    },
+    {
+      "name": "ped-lens",
+      "count": 8,
+      "minY": 2.57,
+      "maxY": 3.35,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "vending-body",
+      "count": 8,
+      "minY": 0.22,
+      "maxY": 2.12,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "vending-front",
+      "count": 8,
+      "minY": 0.29,
+      "maxY": 2.11,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "clutter-cone",
+      "count": 6,
+      "minY": 0.22,
+      "maxY": 0.94,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "signal-poles",
+      "count": 4,
+      "minY": 0,
+      "maxY": 6.4,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    },
+    {
+      "name": "roof-helipad",
+      "count": 1,
+      "minY": 116,
+      "maxY": 116,
+      "sunken": 0,
+      "deep": 0,
+      "floating": 0,
+      "samples": []
+    }
+  ],
+  "buildingOverlaps": [],
+  "buildingOverlapCount": 0,
+  "buildingsInRoadway": [],
+  "props": [
+    {
+      "mesh": "signal-heads",
+      "i": 0,
+      "x": 12.4,
+      "z": -13.9,
+      "r": 1.03,
+      "h": 2,
+      "geoR": 0.78
+    },
+    {
+      "mesh": "signal-heads",
+      "i": 1,
+      "x": -12.4,
+      "z": 13.9,
+      "r": 1.03,
+      "h": 2,
+      "geoR": 0.78
+    },
+    {
+      "mesh": "signal-heads",
+      "i": 2,
+      "x": 13.9,
+      "z": 12.4,
+      "r": 1.03,
+      "h": 2,
+      "geoR": 0.78
+    },
+    {
+      "mesh": "signal-heads",
+      "i": 3,
+      "x": -13.9,
+      "z": -12.4,
+      "r": 1.03,
+      "h": 2,
+      "geoR": 0.78
+    },
+    {
+      "mesh": "signal-heads",
+      "i": 4,
+      "x": 13.7,
+      "z": -13.7,
+      "r": 0.75,
+      "h": 2,
+      "geoR": 0.78
+    },
+    {
+      "mesh": "signal-heads",
+      "i": 5,
+      "x": -13.7,
+      "z": 13.7,
+      "r": 0.75,
+      "h": 2,
+      "geoR": 0.78
+    },
+    {
+      "mesh": "signal-heads",
+      "i": 6,
+      "x": 13.7,
+      "z": 13.7,
+      "r": 0.75,
+      "h": 2,
+      "geoR": 0.78
+    },
+    {
+      "mesh": "signal-heads",
+      "i": 7,
+      "x": -13.7,
+      "z": -13.7,
+      "r": 0.75,
+      "h": 2,
+      "geoR": 0.78
+    },
+    {
+      "mesh": "signal-poles",
+      "i": 0,
+      "x": 13.9,
+      "z": -13.9,
+      "r": 1.45,
+      "h": 6.4,
+      "geoR": 1.2
+    },
+    {
+      "mesh": "signal-poles",
+      "i": 1,
+      "x": -13.9,
+      "z": 13.9,
+      "r": 1.45,
+      "h": 6.4,
+      "geoR": 1.2
+    },
+    {
+      "mesh": "signal-poles",
+      "i": 2,
+      "x": 13.9,
+      "z": 13.9,
+      "r": 1.45,
+      "h": 6.4,
+      "geoR": 1.2
+    },
+    {
+      "mesh": "signal-poles",
+      "i": 3,
+      "x": -13.9,
+      "z": -13.9,
+      "r": 1.45,
+      "h": 6.4,
+      "geoR": 1.2
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 0,
+      "x": 13.4,
+      "z": 22,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 1,
+      "x": 22,
+      "z": 13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 2,
+      "x": 13.4,
+      "z": -22,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 3,
+      "x": -22,
+      "z": 13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 4,
+      "x": 13.4,
+      "z": 47,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 5,
+      "x": 47,
+      "z": 13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 6,
+      "x": 13.4,
+      "z": -47,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 7,
+      "x": -47,
+      "z": 13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 8,
+      "x": 13.4,
+      "z": 72,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 9,
+      "x": 72,
+      "z": 13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 10,
+      "x": 13.4,
+      "z": -72,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 11,
+      "x": -72,
+      "z": 13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 12,
+      "x": 13.4,
+      "z": 97,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 13,
+      "x": 97,
+      "z": 13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 14,
+      "x": 13.4,
+      "z": -97,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 15,
+      "x": -97,
+      "z": 13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 16,
+      "x": 13.4,
+      "z": 122,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 17,
+      "x": 122,
+      "z": 13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 18,
+      "x": 13.4,
+      "z": -122,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 19,
+      "x": -122,
+      "z": 13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 20,
+      "x": 13.4,
+      "z": 147,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 21,
+      "x": 147,
+      "z": 13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 22,
+      "x": 13.4,
+      "z": -147,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 23,
+      "x": -147,
+      "z": 13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 24,
+      "x": 13.4,
+      "z": 172,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 25,
+      "x": 172,
+      "z": 13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 26,
+      "x": 13.4,
+      "z": -172,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 27,
+      "x": -172,
+      "z": 13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 28,
+      "x": -13.4,
+      "z": 22,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 29,
+      "x": 22,
+      "z": -13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 30,
+      "x": -13.4,
+      "z": -22,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 31,
+      "x": -22,
+      "z": -13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 32,
+      "x": -13.4,
+      "z": 47,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 33,
+      "x": 47,
+      "z": -13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 34,
+      "x": -13.4,
+      "z": -47,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 35,
+      "x": -47,
+      "z": -13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 36,
+      "x": -13.4,
+      "z": 72,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 37,
+      "x": 72,
+      "z": -13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 38,
+      "x": -13.4,
+      "z": -72,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 39,
+      "x": -72,
+      "z": -13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 40,
+      "x": -13.4,
+      "z": 97,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 41,
+      "x": 97,
+      "z": -13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 42,
+      "x": -13.4,
+      "z": -97,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 43,
+      "x": -97,
+      "z": -13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 44,
+      "x": -13.4,
+      "z": 122,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 45,
+      "x": 122,
+      "z": -13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 46,
+      "x": -13.4,
+      "z": -122,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 47,
+      "x": -122,
+      "z": -13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 48,
+      "x": -13.4,
+      "z": 147,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 49,
+      "x": 147,
+      "z": -13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 50,
+      "x": -13.4,
+      "z": -147,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 51,
+      "x": -147,
+      "z": -13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 52,
+      "x": -13.4,
+      "z": 172,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 53,
+      "x": 172,
+      "z": -13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 54,
+      "x": -13.4,
+      "z": -172,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    },
+    {
+      "mesh": "lamp-poles",
+      "i": 55,
+      "x": -172,
+      "z": -13.4,
+      "r": 1.42,
+      "h": 8.2,
+      "geoR": 1.17
+    }
+  ],
+  "propsFat": 0,
+  "propsVeryFat": 0,
+  "stats": {
+    "buildings": 92,
+    "buckets": 3,
+    "neon": 104,
+    "shops": 111,
+    "lamps": 56,
+    "debris": 240,
+    "screens": 3,
+    "draws": 158
+  }
+}

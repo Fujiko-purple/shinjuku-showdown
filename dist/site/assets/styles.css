@@ -120,11 +120,12 @@ body::after {
   color: #fff; font-weight: 600;
 }
 .fp-name .en {
-  font-size: 9px; letter-spacing: .28em; color: rgba(232,230,223,.45);
+  font-size: 12px; letter-spacing: .18em; color: rgba(232,230,223,.72);
 }
 .fp-side {
-  font-size: 9px; letter-spacing: .22em; color: rgba(255,216,115,.65);
+  font-size: 12px; letter-spacing: .16em; color: rgba(255,216,115,.95);
   border: 1px solid rgba(255,216,115,.3); padding: 0 4px; border-radius: 2px;
+  background: rgba(6,6,12,.5); /* 深色芯片底：爆炸/领域中也能读 */
 }
 .hp-num {
   margin-left: auto; font-family: var(--f-num); font-size: 22px;
@@ -184,15 +185,20 @@ body::after {
 /* 咒力 / 领域行：细条 + 百分比 */
 .stat-row {
   display: flex; align-items: center; gap: 7px; margin-top: 4px;
+  /* 极淡的暗底条：让咒力/领域标签与百分比在任何明亮背景（领域展开、爆炸）上都有底 */
+  background: rgba(6,6,12,.34);
+  padding: 1px 5px;
+  border-radius: 2px;
 }
 .fighter-panel.right .stat-row { flex-direction: row-reverse; }
 .stat-label {
-  font-size: 9px; letter-spacing: .18em; color: rgba(232,230,223,.5);
+  font-size: 12px; letter-spacing: .12em; color: rgba(232,230,223,.78);
   white-space: nowrap;
+  text-shadow: 0 1px 3px #000, 0 0 6px rgba(0,0,0,.95);
 }
 .stat-num {
-  font-family: var(--f-num); font-size: 11.5px; color: rgba(255,255,255,.92);
-  min-width: 34px; text-align: right; text-shadow: 0 1px 3px #000;
+  font-family: var(--f-num); font-size: 12.5px; color: #fff;
+  min-width: 38px; text-align: right; text-shadow: 0 1px 3px #000, 0 0 6px rgba(0,0,0,.95);
 }
 .fighter-panel.right .stat-num { text-align: left; }
 .tech-bar {
@@ -224,14 +230,14 @@ body::after {
 }
 
 .burnout {
-  margin-top: 5px; font-size: 10px; letter-spacing: .26em;
+  margin-top: 5px; font-size: 12px; letter-spacing: .2em;
   color: var(--gold); text-shadow: 0 0 10px rgba(255,216,115,.9);
   animation: flick .35s steps(2) infinite;
 }
 @keyframes flick { 50% { opacity: .35; } }
 
 /* 摩虚罗之轮 */
-.wheel { margin-top: 5px; font-size: 9px; letter-spacing: .2em; color: rgba(255,216,115,.75); }
+.wheel { margin-top: 5px; font-size: 12px; letter-spacing: .16em; color: rgba(255,216,115,.85); }
 .wheel-dots { display: flex; gap: 4px; justify-content: flex-end; margin-top: 3px; }
 .wheel-dots i {
   width: 8px; height: 8px; transform: rotate(45deg);
@@ -258,8 +264,8 @@ body::after {
   margin-top: 3px;
 }
 .phase-tag, .focus-dist {
-  font-size: 10px; letter-spacing: .16em; padding: 2px 8px; border-radius: 2px;
-  background: rgba(6,6,12,.6); text-shadow: 0 1px 3px #000;
+  font-size: 12px; letter-spacing: .14em; padding: 3px 9px; border-radius: 2px;
+  background: rgba(6,6,12,.72); text-shadow: 0 1px 3px #000, 0 0 6px rgba(0,0,0,.95);
 }
 .phase-tag { color: rgba(255,150,150,.92); border: 1px solid rgba(255,31,61,.35); }
 .phase-tag.ph2 { color: #ffb27a; border-color: rgba(255,140,60,.5); }
@@ -270,7 +276,9 @@ body::after {
 .focus-dist.far { color: rgba(255,255,255,.42); }
 
 .combo {
-  position: absolute; left: 50%; top: 74px; transform: translateX(-50%) scale(.6);
+  /* 连击紧贴计时器下方（58px）；信息条在 132px、戏剧大字在 19%——
+     三层纵向排开，任何两个同时出现都不会叠在一起（Lead 报过 combo 与 banner 同 top 的问题） */
+  position: absolute; left: 50%; top: 58px; transform: translateX(-50%) scale(.6);
   opacity: 0; transition: opacity .12s, transform .12s;
   white-space: nowrap; pointer-events: none;
 }
@@ -348,14 +356,15 @@ body::after {
   text-shadow: 0 1px 4px #000;
 }
 .ab .ab-glyph {
-  position: absolute; inset: 12px 8px 18px; z-index: 2;
+  /* 上边距让开键帽与咒力消耗，下边距让开术式名：三块不许相交（审计口径） */
+  position: absolute; inset: 18px 9px 23px; z-index: 2;
   display: grid; place-items: center;
   font-family: var(--f-jp); font-size: 27px; color: #fff;
   text-shadow: 0 0 16px currentColor, 0 2px 6px #000;
 }
 .ab .ab-name {
   position: absolute; bottom: 3px; left: 0; right: 0; z-index: 3;
-  font-size: 9.5px; text-align: center; letter-spacing: .05em;
+  font-size: 12px; text-align: center; letter-spacing: .02em;
   font-family: var(--f-ui); color: rgba(255,255,255,.82); text-shadow: 0 0 8px #000;
 }
 .ab .ab-cd { position: absolute; inset: 0; z-index: 1; background: rgba(0,0,0,.66); transform-origin: bottom; transform: scaleY(0); transition: transform .1s linear; }
@@ -398,8 +407,8 @@ body::after {
 }
 .hints.show { opacity: 1; }
 .hint {
-  font-size: 11.5px; letter-spacing: .1em;
-  padding: 4px 10px; color: rgba(255,255,255,.92);
+  font-size: 12px; letter-spacing: .08em;
+  padding: 4px 10px; color: rgba(255,255,255,.95);
   background: rgba(6,6,12,.62);
   border-left: 2px solid var(--gold);
   text-shadow: 0 0 10px #000;
@@ -467,7 +476,8 @@ body::after {
    戏剧大字放在画面上部 16%，人物在画面中下部，不会糊脸。
    ---------------------------------------------------------------------- */
 .banner {
-  position: absolute; left: 50%; top: 74px; transform: translateX(-50%);
+  /* 132px：顶栏（约 108px 高）之下、连击（58~110px）之下，三层不打架 */
+  position: absolute; left: 50%; top: 132px; transform: translateX(-50%);
   z-index: 5; pointer-events: none; opacity: 0;
   white-space: pre-line; text-align: center;
   font-family: var(--f-ui); font-size: 15px; letter-spacing: .14em;
@@ -483,7 +493,7 @@ body::after {
   to { transform: translateX(-50%) translateY(0); opacity: 1; }
 }
 .banner.drama {
-  top: 15%;
+  top: 19%; /* 连击块底边约 110px，戏剧大字从 19% 起，两者不叠 */
   font-family: var(--f-jp); font-size: clamp(34px, 4.6vw, 62px);
   letter-spacing: .2em; line-height: 1.2; padding: 6px 40px;
   background: none;
@@ -533,7 +543,7 @@ body::after {
   background: linear-gradient(90deg, var(--violet), var(--cyan));
   box-shadow: 0 0 12px var(--violet);
 }
-.cine-skip { font-size: 11px; letter-spacing: .24em; color: rgba(255,255,255,.6); }
+.cine-skip { font-size: 12px; letter-spacing: .2em; color: rgba(255,255,255,.75); }
 .cine-skip b { color: var(--gold); font-family: var(--f-num); }
 
 /* --- 音量：收在右下角一枚按钮里 --- */
@@ -563,7 +573,7 @@ body::after {
 .audio-dock.open .audio-panel { display: flex; }
 .audio-panel label {
   display: flex; align-items: center; gap: 7px;
-  font-size: 10px; letter-spacing: .18em; color: rgba(255,255,255,.82);
+  font-size: 12px; letter-spacing: .14em; color: rgba(255,255,255,.9);
 }
 .audio-panel input { width: 84px; height: 3px; accent-color: var(--crimson); }
 .audio-panel i { font-family: var(--f-num); font-style: normal; width: 22px; text-align: right; }
@@ -596,7 +606,7 @@ body::after {
   text-align: center; padding: 22px;
 }
 .title-kicker {
-  font-size: 11px; letter-spacing: .72em; color: var(--crimson);
+  font-size: 12px; letter-spacing: .6em; color: var(--crimson);
   margin-bottom: 10px; text-shadow: 0 0 20px rgba(255,31,61,.7);
 }
 .title-main { margin: 0; line-height: .94; }
@@ -610,7 +620,7 @@ body::after {
 }
 .t-en {
   display: block; margin-top: 8px;
-  font-size: clamp(9px, 1.15vw, 14px); letter-spacing: .66em;
+  font-size: clamp(12px, 1.15vw, 14px); letter-spacing: .5em;
   color: rgba(255,216,115,.85);
 }
 .title-vs {
@@ -644,8 +654,8 @@ body::after {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
 }
 .btn .btn-sub {
-  font-family: var(--f-ui); font-size: 10px; letter-spacing: .1em;
-  color: rgba(255,255,255,.5);
+  font-family: var(--f-ui); font-size: 12px; letter-spacing: .08em;
+  color: rgba(255,255,255,.68);
 }
 .btn:hover {
   transform: translateY(-2px);
@@ -674,14 +684,14 @@ body::after {
   letter-spacing: .34em; color: var(--gold);
 }
 .cg-col p {
-  margin: 2px 0; font-size: 11.5px; line-height: 1.65;
+  margin: 2px 0; font-size: 12px; line-height: 1.65;
   color: rgba(232,230,223,.72);
 }
 .cg-col b { color: #fff; font-family: var(--f-num); font-size: 12.5px; letter-spacing: .06em; }
 .cg-col em { color: var(--gold); font-style: normal; }
 
 .title-foot {
-  margin-top: 12px; font-size: 10px; letter-spacing: .24em;
+  margin-top: 12px; font-size: 12px; letter-spacing: .2em;
   color: rgba(232,230,223,.34);
 }
 
@@ -695,7 +705,7 @@ body::after {
   text-shadow: 0 0 30px rgba(255,31,61,.7);
 }
 .pause-inner { display: flex; flex-direction: column; gap: 12px; align-items: center; }
-.pause-note { margin-top: 6px; font-size: 11px; letter-spacing: .2em; color: rgba(255,255,255,.45); }
+.pause-note { margin-top: 6px; font-size: 12px; letter-spacing: .16em; color: rgba(255,255,255,.7); }
 .pause-note b, .loading-step { color: var(--gold); }
 
 .result-mark {
@@ -731,7 +741,7 @@ body::after {
   font-family: var(--f-jp); font-size: 17px; letter-spacing: .4em;
   color: #fff; margin-bottom: 8px;
 }
-.loading-step { font-size: 11px; letter-spacing: .24em; }
+.loading-step { font-size: 12px; letter-spacing: .2em; }
 
 /* 引导诊断面板：把「永远转圈」变成能看懂的原因 */
 .boot-diag {
@@ -761,51 +771,64 @@ body::after {
 #crash-msg {
   text-align: left; max-height: 42vh; overflow: auto;
   background: rgba(0,0,0,.65); border: 1px solid rgba(255,31,61,.4);
-  padding: 12px; font-size: 11.5px; line-height: 1.55;
+  padding: 12px; font-size: 12px; line-height: 1.55;
   color: #ffb3b3; white-space: pre-wrap; word-break: break-word;
 }
 
 /* ============================== 小屏 / 低分辨率适配 ============================== */
+@media (max-width: 1100px) {
+  /* 顶栏三块必须在同一行里互不相交：面板 33vw ×2 + 中间读数 + 间隙 */
+  .banner { max-width: 30vw; }
+}
+
 @media (max-width: 1024px) {
-  .fighter-panel { width: min(38vw, 360px); }
+  .fighter-panel { width: min(33vw, 340px); }
   .ab { width: 68px; height: 68px; }
   .ab .ab-glyph { font-size: 23px; }
 }
 
 @media (max-width: 860px) {
   .top-strip { padding: 8px 10px 0; gap: 6px; }
-  .fighter-panel { width: 44vw; }
+  .fighter-panel { width: 34vw; } /* 原 44vw：390 宽竖屏下中间读数会被两块面板夹住 */
+  .center-readout { min-width: 0; max-width: 126px; }
+  /* 阶段/距离两颗芯片改纵向排列：横向排开会让中间读数宽到压住左右面板 */
+  .center-sub { flex-direction: column; gap: 3px; }
   .fp-name .jp { font-size: 15px; letter-spacing: .08em; }
   .fp-name .en, .fp-side { display: none; }
   .hp-num { font-size: 17px; }
   .hp-bar { height: 12px; }
   .stat-label { display: none; }
   .timer { font-size: 24px; }
-  .phase-tag, .focus-dist { font-size: 9px; padding: 1px 6px; }
+  .phase-tag, .focus-dist { font-size: 12px; padding: 2px 7px; }
   .combo b { font-size: 32px; }
   .combo { top: 60px; }
   .ability-bar { gap: 6px; bottom: 12px; }
-  .ab { width: 54px; height: 54px; }
-  .ab .ab-glyph { font-size: 19px; inset: 9px 5px 14px; }
-  .ab .ab-name { font-size: 8px; }
-  .ab .ab-key { font-size: 10px; min-width: 16px; }
-  .ab .ab-cost { font-size: 10px; }
-  .banner { font-size: 13px; padding: 4px 18px; }
+  .ab { width: 58px; height: 58px; }
+  .ab .ab-glyph { font-size: 19px; inset: 18px 6px 24px; }
+  .ab .ab-name { font-size: 12px; }
+  .ab .ab-key { font-size: 12px; min-width: 18px; }
+  .ab .ab-cost { font-size: 12px; }
+  .banner { top: 96px; font-size: 13px; padding: 4px 18px; max-width: 88vw; }
   .banner.drama { font-size: clamp(26px, 8vw, 44px); }
   .hints { bottom: 84px; left: 10px; }
-  .hint { font-size: 10px; padding: 3px 7px; }
+  .hint { font-size: 12px; padding: 3px 8px; }
   .audio-dock { right: 10px; bottom: 12px; }
   .clash { bottom: 13vh; width: 90vw; padding: 9px 12px 8px; }
   .clash-title { font-size: 15px; letter-spacing: .26em; }
-  .clash-hint { font-size: 11.5px; letter-spacing: .1em; }
+  .clash-hint { font-size: 12px; letter-spacing: .08em; }
   .title-actions .btn { min-width: 150px; padding: 11px 18px; font-size: 15px; }
 }
 
 @media (max-height: 620px) {
+  /* 矮屏（横屏手机）改成"下三分"字幕位：顶栏已经把上部占满，信息条放下面才不会打架 */
+  .banner { top: auto; bottom: 96px; }
+  .banner.drama { top: auto; bottom: 118px; font-size: clamp(24px, 6vw, 38px); }
+  /* 矮屏把连击数字收小，保证它仍然待在信息条上方 */
+  .combo b { font-size: 32px; }
   .controls-grid { display: none; }
   .title-vs { margin: 10px auto 0; }
   .hints { display: none; }
-  .banner { top: 60px; }
+  .banner { top: auto; bottom: 96px; }
 }
 
 /* --- 触屏小字的可读性补丁 -------------------------------------------------
@@ -816,7 +839,30 @@ body::after {
    注：本规则只覆盖字号，其余触屏布局仍由 mobile.css 说了算。
    ------------------------------------------------------------------------ */
 html.is-touch #hud #ability-bar .ab .ab-cost { font-size: clamp(13px, 2.6vmin, 15px); }
+/* 信息条：mobile.css 把它放在 21%、把提示行放在 28%，两者在 390x844 下实测重叠 51px。
+   这里把信息条抬到 13%（顶栏之下、提示行之上），并限制宽度。 */
+html.is-touch #hud #banner { top: 15%; max-width: 92vw; font-size: clamp(14px, 3.4vmin, 20px); }
+@media (max-height: 620px) {
+  /* 触屏横屏：同样改成下三分字幕位（这条特异性高于上面那条，能压住） */
+  html.is-touch #hud #banner { top: auto; bottom: 96px; }
+  html.is-touch #hud #banner.drama { top: auto; bottom: 118px; }
+}
+html.is-touch #hud .center-readout #phase-tag { font-size: 12px; letter-spacing: .08em; }
+html.is-touch #hud .center-readout #focus-dist { font-size: 12px; }
 html.is-touch #hud .stat-num { font-size: 12.5px; }
+/* mobile.css 触屏档里还有几处 <12px 的文字（验收口径：<12px 且含文字即问题），
+   这些是 mobile-ship 的写域，我只在自己的 styles.css 里做最小覆盖，不改他的文件。 */
+html.is-touch #hud .fighter-panel { width: 31vw; } /* 31vw 才够给中间读数留出净空 */
+/* 音量按钮：触屏档右下角是 mobile.css 的动作键簇，实测重叠 34x34 —— 挪到右侧中部 */
+html.is-touch #hud .audio-dock { bottom: auto; top: 46%; right: 8px; }
+html.is-touch #hud #ability-bar .ab .ab-name { font-size: clamp(12px, 2.4vmin, 13px); }
+/* mobile.css 用百分比 inset(22%/26%) 定位字形区；术式名放大到 12px 后两者会叠 24px，
+   这里按同一几何关系改用 30%/36%，把名字的空间让出来 */
+html.is-touch #hud #ability-bar .ab .ab-glyph { inset: 30% 8% 36%; }
+html.is-touch #hud #ability-bar .ab .ab-key { font-size: 12px; }
+html.is-touch #hud .hints .hint { font-size: 12px; }
+html.is-touch #hud .clash .clash-hint { font-size: 12px; }
+html.is-touch #hud .dom-wrap { font-size: 12px; }
 
 /* 手机竖屏：技能栏缩小、面板更紧凑（mobile.css 会再叠一层触屏控件样式） */
 @media (orientation: portrait) and (max-width: 860px) {

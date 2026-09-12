@@ -627,8 +627,14 @@ function updateGodCam(dt, snap) {
       wantX = gp.x * 0.62 + sp.x * 0.38 + cam.panX;
       wantZ = gp.z * 0.62 + sp.z * 0.38 + cam.panZ;
       wantY = Math.max(gp.y, sp.y) + CAM_LOOK_H; // 与普通战斗同一注视高度，人物落在画面中部
-      fracT = clampNum2(0.16 - sep * 0.006, 0.12, 0.16); // 对撞要同时看两个人 + 领域球，站得更远
-      wantPitch = 0.55; // 对撞时抬高机位，两人 + 领域球一起进画面
+      /**
+       * 对撞取景：必须**明显拉远 + 抬高**。
+       * 原来 0.12~0.16 的占屏 + 0.55 俯角实测把镜头埋在两层领域的汉字贴面里，
+       * 整屏都是放大的「无」「量」「空」字样（shots/FIN7-06-clash.png），玩家根本读不出场面。
+       * 现在压到 0.10~0.135 并抬到 0.68，能看到两个领域球、拉锯轴线和两名角色。
+       */
+      fracT = clampNum2(0.135 - sep * 0.005, 0.1, 0.135);
+      wantPitch = 0.68; // 对撞时抬高机位，两人 + 领域球一起进画面
       baseYaw += dt * 0.07;
       cam.lockOn || (cam.yaw += 0);
     } else {

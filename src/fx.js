@@ -617,7 +617,11 @@ void main() {
   vec4 mv = modelViewMatrix * vec4( position, 1.0 );
   gl_Position = projectionMatrix * mv;
   float d = max( 0.35, -mv.z );
-  gl_PointSize = clamp( aSize * uScale / d, 1.0, 900.0 );
+  /* 下限从 1px 提到 2.2px（task-6 修复）：
+   * 1px 的点画不出贴图的圆形渐变，屏幕上就是"一个纯色小方块"。
+   * 3px 以上才看得出"火星"的形状；配合下面的热核着色，近处是亮点、远处是圆点。
+   */
+  gl_PointSize = clamp( aSize * uScale / d, 2.2, 900.0 );
 }
 `
   );
@@ -630,9 +634,14 @@ varying vec3 vColor;
 varying float vAlpha;
 void main() {
   vec4 t = texture2D( uMap, gl_PointCoord );
-  float a = t.a * vAlpha;
+  /* 火星质感（task-6 修复）：
+   * a) 用 1.45 次幂收紧外圈 → 从"棉花球"变成有明确边界的亮点
+   * b) 中心混一点白热核 → 火星该有"亮芯 + 本色外晕"，而不是一整块纯色
+   */
+  float a = pow( t.a, 1.45 ) * vAlpha;
   if ( a < 0.004 ) discard;
-  gl_FragColor = vec4( vColor * t.rgb * a, a );
+  vec3 col = mix( vColor, vec3( 1.0 ), pow( t.a, 3.0 ) * 0.55 );
+  gl_FragColor = vec4( col * t.rgb * a, a );
 }
 `
   );
@@ -1549,11 +1558,19 @@ void main() {
         u.maxR = Math.max(0.02, def(o.maxRadius, 6));
         u.startR = clamp3(def(o.radius, 0.05), 1e-3, u.maxR);
         u.life = def(o.life, 0.55);
-        u.thick = clamp3(def(o.thickness, 0.35), 0.03, 0.95);
+        /* 【task-6 修复】冲击波的"环宽"同样按半径自适应。
+         * thickness 是"环带占半径的比例"：0.9 的比例落在 26m 半径的冲击波上就是
+         * 23m 宽的实心环带 —— 加法混合叠几层，屏幕正中就是一个巨大的纯白圆盘/圆环
+         * （Lead 截图 AUD4-02-void.png 的白椭圆盘，用"逐个隐藏网格 + 量中心白像素"
+         * 的方法定位到就是这一类 renderOrder=6 的冲击波环）。
+         * 现在把环带的世界宽度锁在约 1.4m：半径越大，比例越小。
+         */
+        u.thick = clamp3(Math.min(def(o.thickness, 0.35), 1.4 / Math.max(2, u.maxR)), 0.02, 0.95);
         u.tilt = def(o.tilt, 0);
         u.bright = def(o.bright, 1);
         u.soft = def(o.soft, 0.42);
         u.segments = clamp3(def(o.segments, 64) | 0, 12, 128);
+        u.bandR = 1.7;
         u.ringCount = clamp3(def(o.ringCount, 1) | 0, 1, 4);
         u.innerFade = def(o.innerFade, 1);
         // 方向性冲击波：arc>0 时只画一个扇区，arcDir 是扇区中心（局部极角）
@@ -1604,7 +1621,8 @@ void main() {
         un.uBurn.value = u.burn;
         un.uArc.value = u.arc;
         un.uArcDir.value = u.arcDir;
-        un.uBright.value = u.bright * (1 - 0.3 * grow);
+        // 大半径冲击波按半径摊薄亮度（40m 的白环不该和 4m 的一样亮）
+        un.uBright.value = u.bright * (1 - 0.3 * grow) * clamp3(8 / Math.max(3, u.maxR), 0.25, 1);
         un.uLife.value = clamp3(env, 0, 1) * (1 - 0.55 * grow);
         for (let k = 0; k < u.mesh.length; k++) {
           const m = u.mesh[k];
@@ -2334,6 +2352,14 @@ void main() {
         u.maxR = Math.max(0.1, def(o.maxRadius, 9));
         u.life = def(o.life, 0.9);
         u.thick = clamp3(def(o.thickness, 0.5), 0.05, 0.95);
+        /* 【task-6 修复】地面环的"环宽"改成按半径自适应。
+         * 领域展开时 combat 会发一个 maxRadius=40~90 的地面环，而 thickness 是
+         * "环带占半径的比例" —— 0.9 的比例落在 40m 半径上就是一圈 36m 宽的实心环，
+         * 屏幕上直接是一个巨大的白色实心椭圆盘（Lead 截图 AUD4-02-void.png）。
+         * 现在把环带的世界宽度锁在大约 1.7m 左右：半径越大，比例越小。
+         */
+        u.bandR = 1.7;
+        u.thick = clamp3(Math.min(u.thick, u.bandR / Math.max(2, u.maxR)), 0.04, 0.95);
         u.segments = clamp3(def(o.segments, 64) | 0, 12, 128);
         u.alive = true;
       };
@@ -2401,9 +2427,17 @@ void main() {
         mat.uniforms.uLife.value = 1 - k * k;
         mat.uniforms.uColor.value.copy(u.color);
         mat.uniforms.uColor2.value.copy(u.color2);
-        mat.uniforms.uSoft.value = def(u.soft, 0.5);
+        // 环带比例同时按"当前半径"收窄：越往外扩，环带越细（避免大面积实心圆盘）
+        const grow2 = easeOut(clamp3(u.age / Math.max(1e-3, u.life), 0, 1));
+        mat.uniforms.uSoft.value = clamp3(def(u.soft, 0.5) * (1 - 0.35 * grow2), 0.14, 0.6);
         mat.uniforms.uBurn.value = 1;
-        mat.uniforms.uBright.value = def(u.bright, 1);
+        /* 大半径地面环按半径衰减亮度：
+         * 领域展开会发 maxRadius=40~90 的环，如果亮度和 6m 的小环一样，
+         * 屏幕中下部就是一片纯白的实心/半实心面（Lead 截图里的"白椭圆盘"）。
+         * 这里把"单位面积上的能量"按半径摊薄（≈6/maxR），大环只剩淡淡一道边界。
+         */
+        const bigAtten = clamp3(6 / Math.max(2, u.maxR), 0.2, 1);
+        mat.uniforms.uBright.value = def(u.bright, 1) * (1 - 0.35 * grow2) * bigAtten;
         mat.uniforms.uInner.value = 1;
       }
     }
@@ -2491,6 +2525,32 @@ void main() {
       u.scale = crit ? 1.5 : 1;
       u.life = def(o.life, crit ? 1.25 : 0.95);
       u.wob = rnd() * TAU2;
+      /* 【task-6 修复】连击时伤害数字在同一世界坐标叠成一团（Lead 截图 AUD5-02-combo.png 的「4 3 3」）。
+       * 做法：统计"刚出现且离得很近"的数字个数，按序号沿**相机右方向**左右错开，
+       * 并给一点点高度差 —— 屏幕上就变成并排的几个数字，每个都读得出来。
+       */
+      let dup = 0;
+      for (let i = 0; i < this.active.length; i++) {
+        const other = this.active[i];
+        if (other === u || !other.alive) continue;
+        if (other.age > 0.5) continue;
+        if (other.pos.distanceToSquared(u.pos) > 6.25) continue;
+        dup++;
+      }
+      if (dup > 0) {
+        const cam = this.ctx.camera;
+        _v6.set(1, 0, 0);
+        if (cam && cam.matrixWorld) {
+          const e2 = cam.matrixWorld.elements;
+          _v6.set(e2[0], e2[1], e2[2]);
+          if (_v6.lengthSq() < 1e-6) _v6.set(1, 0, 0);
+          _v6.normalize();
+        }
+        // 0,+1,-1,+2,-2 … 依次向两侧铺开
+        const slot = Math.ceil(dup / 2) * (dup % 2 === 1 ? 1 : -1);
+        u.pos.addScaledVector(_v6, slot * 0.62);
+        u.pos.y += Math.min(3, dup) * 0.16;
+      }
       u.age = 0;
       u.sprite.visible = true;
       u.alive = true;
@@ -3785,6 +3845,34 @@ void main() {
       if (s.freeze < 4e-3) s.freeze = 0;
       s.life = Math.max(Math.min(1, s.flash * 2), Math.min(1, s.vignette), Math.min(1, s.freeze * 1.4));
     }
+    /**
+     * 预热常用大字贴图。
+     * 每次新建一张 1024² 的 canvas 大字要 ~20ms（实测：领域对撞那一帧 fx.callout 占了 20ms），
+     * 一次性卡在战斗高潮那帧特别明显。这里把本作会用到的大字在标题界面空闲时先画好进 LRU，
+     * 真正触发时直接命中缓存。
+     */
+    function warmCommonCues() {
+      const list = [
+        ["领域对撞", "DOMAIN CLASH", C.VIOLET, C.CRIMSON],
+        ["黑闪", "BLACK FLASH", C.GOLD, C.INK],
+        ["无量空处", "UNLIMITED VOID", C.CYAN, C.WHITE],
+        ["宿傩", "解 · 捌 · 开", C.CRIMSON, C.BLOOD],
+        ["摩虚罗之轮", "适应", C.GOLD, C.CRIMSON],
+        ["扩张术式 解", "空间斩", C.CRIMSON, C.BLOOD],
+        ["虚式「茈」", "200%", C.VIOLET, C.WHITE],
+        ["术式顺转", "苍", C.CYAN, C.AZURE],
+        ["术式反转", "赫", C.SCARLET, C.CRIMSON],
+        ["无下限", "不可侵", C.CYAN, C.WHITE],
+        ["适应", "", C.GOLD, C.INK],
+        ["胜利", "VICTORY", C.CYAN, C.WHITE],
+        ["败北", "DEFEAT", C.CRIMSON, C.INK],
+        ["领域终结", "12s", C.VIOLET, C.WHITE]
+      ];
+      for (let i = 0; i < list.length; i++) {
+        try { tex.calloutTex(list[i][0], list[i][1], list[i][2], list[i][3]); } catch (e) { /* 预热失败不影响运行 */ }
+      }
+      return list.length;
+    }
     function clear() {
       particles.releaseAll();
       shocks.releaseAll();
@@ -3871,6 +3959,7 @@ void main() {
       groundRing,
       damageNumber,
       callout,
+      warmCommonCues,
       debris,
       trail,
       lightning,

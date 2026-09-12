@@ -3270,16 +3270,28 @@
      */
     const dbg = { mv: 0, want: 0, wantAnim: "", cd: 0, blocked: 0, sp: 0, gaitIn: 0 };
     let cmdAge = 0;                // 连续多少次更新没有收到移动指令
+    let curHold = false;           // 本次动作播完是否要保持末帧（受击硬直等）
     let turnVel = 0;               // 转身角速度 rad/s
     let leanRoll = 0;              // 转弯侧倾
     let leanPitch = 0;             // 加减速前后倾
+    // 受击让位：上身朝被打的那一侧让开并后仰，攻击方的拳头就不会"插进"躯干里
+    let yieldRoll = 0;
+    let yieldPitch = 0;
     /* 姿态交叉淡入：切换动作时从"上一帧真正贴上去的姿态"过渡到新动作，
      * 不再是一帧硬切（原先 run→punch 单帧跳变 2.54 弧度） */
     const appliedPose = {};
     for (const bb of BONES) appliedPose[bb] = [0, 0, 0];
+    // 本帧"目标姿态"的副本：用来判断过渡是否真的收敛到目标
+    const rawPose = {};
+    for (const bb of BONES) rawPose[bb] = [0, 0, 0];
     let appliedRootY = 0;
     let blendT = 1;
     let blendDur = 0.18;
+    let blending = false;   // 是否正在过渡（结束条件是"收敛"而不是"计时到"）
+    let blendTime = 0;
+    let blendSteps = 0;     // 过渡经过了多少次 update（兜底：dt 异常时也能保证收敛）
+    let lastDt = 0;         // 最近一次 update 的 dt（诊断用）
+    let stepPeak = 0;       // 自上次 play 起，单次 update 内骨骼最大变化量（弧度）
     const setFlash = (v) => {
       flash = clamp5(v, 0, 1);
       for (const m of toonMats) m.uniforms.uFlash.value = flash;
@@ -3308,6 +3320,7 @@
     };
     const update2 = (dt) => {
       const d = Math.min(Math.max(dt || 0, 0), 0.1);
+      lastDt = d;
       tGlobal += d;
       state2.animT = curT;
       const clip = sampler.get(curName);
@@ -3340,38 +3353,61 @@
           // 攻击 / 技能 / 受击的调用方经常直接 return（不等 onEnd），
           // 缺了这一步角色就会一直卡在出拳或受击的最后一帧：
           // 表现为"打完之后僵住不动""移动时腿不摆动像个木偶"。
-          if (curName === finishedName && !HOLD_AFTER_END[curName]) {
+          if (curName === finishedName && !curHold && !HOLD_AFTER_END[curName]) {
             play2("idle", { loop: true });
           }
         }
       }
       if (!sampler.sample(curName, curT, poseBuf)) return;
       // ---- 交叉淡入：从切换瞬间的姿态平滑过渡到新动作 ----
-      if (blendT < 1) {
+      if (blending) {
+        // 先留一份"目标姿态"副本，供收敛判定用（否则会被下面的混合覆盖掉）
+        for (const b of BONES) {
+          const r = rawPose[b], o = poseBuf[b];
+          r[0] = o[0]; r[1] = o[1]; r[2] = o[2];
+        }
+        const rawRootY = poseBuf.__rootY;
         blendT = Math.min(1, blendT + d / blendDur);
+        blendTime += d;
+        blendSteps++;
         // 用 smoothstep 而不是 easeOut：easeOut 第一帧就吃掉 40%，
         // 那一帧本身就是一次大跳变（实测 1.0 弧度），smoothstep 首帧只走 7%
         const bk = blendT * blendT * (3 - 2 * blendT);
+        let maxDiff = 0;
         for (const b of BONES) {
-          const o = poseBuf[b], p = appliedPose[b];
-          o[0] = p[0] + (o[0] - p[0]) * bk;
-          o[1] = p[1] + (o[1] - p[1]) * bk;
-          o[2] = p[2] + (o[2] - p[2]) * bk;
-        }
-        poseBuf.__rootY = appliedRootY + (poseBuf.__rootY - appliedRootY) * bk;
-        // 过渡期间再加一道单帧限幅：掉帧时（一帧 50ms）也不会"啪"一下跳半个动作
-        for (const b of BONES) {
-          const o = poseBuf[b], p = appliedPose[b];
+          const o = poseBuf[b], p = appliedPose[b], r = rawPose[b];
           for (let i = 0; i < 3; i++) {
-            const dd = o[i] - p[i];
-            if (dd > 0.6) o[i] = p[i] + 0.6;
-            else if (dd < -0.6) o[i] = p[i] - 0.6;
+            let w = p[i] + (o[i] - p[i]) * bk;
+            // 单帧限幅：掉帧时（一帧 50ms）也不会"啪"一下跳半个动作
+            const dd = w - p[i];
+            if (dd > 0.6) w = p[i] + 0.6;
+            else if (dd < -0.6) w = p[i] - 0.6;
+            o[i] = w;
+            const diff = Math.abs(w - r[i]);
+            if (diff > maxDiff) maxDiff = diff;
           }
         }
+        poseBuf.__rootY = appliedRootY + (poseBuf.__rootY - appliedRootY) * bk;
+        /**
+         * ⚠ 过渡的结束条件必须是"收敛到目标"，不能只看计时。
+         * 上一版是纯计时（blendT>=1 就结束），而单帧限幅 0.6rad 会让姿态落后于目标：
+         * 计时一到就不再混合，姿态**一帧内直接跳到目标** —— 实测 down→idle 那一帧跳 2.229 弧度
+         * （"受击后回 idle 会闪一下"就是这个）。
+         * 现在：姿态与目标的差 < 0.02 且计时到位才算结束，另加 0.6s 兜底。
+         */
+        // 三重结束条件：收敛 / 计时 / **步数**。
+        // 步数兜底是必须的：如果 dt 异常为 0（暂停、掉帧、固定步长累加器给 0），
+        // 计时永远攒不满，blending 会一直为真 —— 60 秒压测里抓到过 4~5 秒的窗口。
+        if ((blendT >= 1 && maxDiff < 0.02) || blendTime > 0.6 || blendSteps > 60) blending = false;
       }
       for (const b of BONES) {
         const node = bones[b];
         const v = poseBuf[b];
+        const p = appliedPose[b];
+        for (let i = 0; i < 3; i++) {
+          const st = Math.abs(v[i] - p[i]);
+          if (st > stepPeak) stepPeak = st;
+        }
         node.rotation.set(v[0], v[1], v[2]);
       }
       bones.hips.position.y = hipsRestY + poseBuf.__rootY;
@@ -3385,15 +3421,40 @@
         bones.core.rotation.x += leanPitch;
         bones.hips.rotation.x += leanPitch * 0.35;
       }
+      // ---- 受击让位：快速衰减的让身（比受击动画更快收，只负责头几帧的"躲"）----
+      if (Math.abs(yieldRoll) > 1e-3 || yieldPitch > 1e-3) {
+        const dec = Math.max(0, 1 - d * 6);
+        yieldRoll *= dec;
+        yieldPitch *= dec;
+        bones.core.rotation.z += yieldRoll;
+        bones.core.rotation.x -= yieldPitch;
+        bones.chest.rotation.x -= yieldPitch * 0.5;
+        bones.hips.rotation.z += yieldRoll * 0.4;
+      }
       if (q.secondary) {
         const breath = Math.sin(tGlobal * 1.75) * 0.026;
-        const sway = Math.sin(tGlobal * 0.62) * 0.02;
-        const sway2 = Math.cos(tGlobal * 0.48) * 0.016;
+        // ---- 待机重心微动：站立时重心在两腿之间缓慢转移 ----
+        // 原来原地站着时骨盆是**完全静止**的（实测 hips 位移范围 0），像雕塑。
+        // 幅度按"角色只占屏高 16%"给：骨盆倾 2.6°、旋转 1.7°，配合呼吸让轮廓一直在微动。
+        const spIdle = Math.hypot(vX, vZ);
+        const idleK = clamp5(1 - spIdle / 1.2, 0, 1);   // 走起来就交给行走层
+        const w1 = Math.sin(tGlobal * 0.62);
+        const w2 = Math.sin(tGlobal * 0.41 + 1.1);
         bones.chest.rotation.x += breath;
-        bones.core.rotation.z += sway;
-        bones.hips.rotation.z += sway2;
+        bones.hips.rotation.z += w1 * 0.045 * idleK;
+        bones.hips.rotation.y += w2 * 0.03 * idleK;
+        bones.hips.position.y -= (0.5 - 0.5 * Math.cos(tGlobal * 1.24)) * 0.008 * idleK;
+        bones.core.rotation.z -= w1 * 0.024 * idleK;   // 上身反向：形成跨部支撑的重心转移
+        bones.core.rotation.x += Math.sin(tGlobal * 0.83) * 0.012 * idleK;
+        bones.chest.rotation.z -= w1 * 0.014 * idleK;
+        bones.hips.rotation.z += Math.cos(tGlobal * 0.48) * 0.016;
         bones.neck.rotation.y += Math.sin(tGlobal * 0.37 + 1.1) * 0.05;
-        bones.head.rotation.z += Math.sin(tGlobal * 0.9) * 0.02;
+        bones.head.rotation.z += Math.sin(tGlobal * 0.9) * 0.02 + w1 * 0.022 * idleK;
+        // 膝关节随重心转移做一点点屈伸（腿在"撑住"身体，不是两根棍）
+        bones.shinL.rotation.x -= (0.5 - 0.5 * Math.cos(tGlobal * 0.62)) * 0.05 * idleK;
+        bones.shinR.rotation.x -= (0.5 + 0.5 * Math.cos(tGlobal * 0.62)) * 0.05 * idleK;
+        bones.thighL.rotation.x += (0.5 - 0.5 * Math.cos(tGlobal * 0.62)) * 0.03 * idleK;
+        bones.thighR.rotation.x += (0.5 + 0.5 * Math.cos(tGlobal * 0.62)) * 0.03 * idleK;
         // ---- 程序化行走层：让"走"是全身的事，而不是上半身刚体平移 ----
         {
           const spNow = Math.hypot(vX, vZ);
@@ -3555,13 +3616,32 @@
         curSpeed = (opt.speed !== void 0 ? opt.speed : 1) * animSpeed(name);
         return;
       }
+      /**
+       * ⚠ 还有一种"重复请求"会致命：调用方用 loop:false 去请求一个正在循环的动作
+       *（典型写法：每帧 play("idle", { loop: false })）。
+       * 上面的早退条件要求 loop3===true，于是这种请求每帧都会走到下面把
+       * curT / blendT / blending 全部清零 —— 姿态永远停在过渡的起点不动。
+       * 60 秒随机输入压测实测：blending 连续为 1 达 5.3 秒（name 还是 idle），
+       * 表现就是"站着不动却一直在抖/僵"。
+       * 处理：循环类动作（非 ONESHOT）收到"降级为一次性"的重复请求时直接忽略。
+       * 真正的一次性动作（punch / hit_* 等）不受影响，仍然可以连续重触发。
+       */
+      if (name === curName && curLoop && !loop3 && !ONESHOT[name]) {
+        curSpeed = (opt.speed !== void 0 ? opt.speed : 1) * animSpeed(name);
+        return;
+      }
       // 攻击起手要快、位移动作可以柔一点：淡入时长按动作类型给
       blendT = 0;
-      blendDur = ONESHOT[name] ? 0.16 : (name === "walk" || name === "run" || name === "idle" ? 0.2 : 0.16);
+      blending = true;
+      blendTime = 0;
+      blendSteps = 0;
+      stepPeak = 0;
+      blendDur = ONESHOT[name] ? 0.16 : (name === "walk" || name === "run" ? 0.15 : name === "idle" ? 0.2 : 0.16);
       curName = name;
       curT = 0;
       ended = false;
       curLoop = loop3;
+      curHold = !!opt.hold;
       curSpeed = (opt.speed !== void 0 ? opt.speed : 1) * animSpeed(name);
       onEndCb = typeof opt.onEnd === "function" ? opt.onEnd : null;
       state2.anim = name;
@@ -3627,7 +3707,7 @@
       // 一次性动作已经播完（且不是需要保持末帧的姿势）时也要允许接管，
       // 否则 move() 会因为 curName 仍是 punch/hit_light 而拒绝切回走跑，
       // 于是"边走边滑、腿一步不摆"。
-      const oneShotDone = !curLoop && ended && !HOLD_AFTER_END[curName];
+      const oneShotDone = !curLoop && ended && !curHold && !HOLD_AFTER_END[curName];
       // 循环中的"非步态"动作（防御姿势、蓄力等）也应该能被走跑接管，
       // 否则只要有一个循环动作没人负责收尾，角色就会一边滑一边保持那个姿势。
       // HOLD_LOOP 里的动作是真正需要玩家保持姿势的，不抢。
@@ -3665,7 +3745,16 @@
         dbg.gaitIn = inGait ? 1 : 0;
         if (wantAnim !== curName && (!inGait || gaitCd <= 0)) {
           play2(wantAnim, { loop: true });
-          gaitCd = 0.12;
+          /**
+           * ⚠ 冷却时长要分情况：
+           * walk↔run 之间来回抖的代价很大 —— 每次 play2 都会把 blendT 归零，
+           * 抖两次就永远收敛不了（60 秒压测实测：切到 walk 后 blend 用了 1183ms 才到 1，
+           * 期间姿态一直挂在半路上 = "动作僵硬"）。
+           * 而"进/出 idle"必须干脆，否则角色会以站姿在地面上滑行。
+           * 所以：步态之间 0.34s（> 交叉淡入 0.2s，保证每次都过渡完），跨界 0.12s。
+           */
+          const bothLoco = (curName === "walk" || curName === "run") && (wantAnim === "walk" || wantAnim === "run");
+          gaitCd = bothLoco ? 0.34 : 0.12;
         } else if (wantAnim !== curName) {
           dbg.blocked++;
         }
@@ -3684,6 +3773,13 @@
           tmpV.normalize().multiplyScalar(2.4 * a);
           knock.x += tmpV.x;
           knock.z += tmpV.z;
+          // 受击侧（角色本地左右）决定上身往哪边让
+          const ly = root.rotation.y;
+          const lx = Math.cos(-ly) * tmpV.x - Math.sin(-ly) * tmpV.z;
+          const base = clamp5(2.4 * a, 0, 4.8);
+          const side = lx >= 0 ? -1 : 1;
+          yieldRoll = side * 0.16 * (base / 2.4);
+          yieldPitch = 0.2 * (base / 2.4);
         }
       }
     };
@@ -3734,6 +3830,7 @@
       curT = 0;
       ended = false;
       curLoop = true;
+      curHold = false;
       curSpeed = animSpeed("idle");
       onEndCb = null;
       state2.anim = "idle";
@@ -3746,7 +3843,11 @@
       targetYaw = null;
       vX = 0; vZ = 0; prevSpd = 0; cmdMove = false;
       turnVel = 0; leanRoll = 0; leanPitch = 0;
+      yieldRoll = 0; yieldPitch = 0;
       blendT = 1;
+      blending = false;
+      blendTime = 0;
+      blendSteps = 0;
       for (const b of BONES) { const a = appliedPose[b]; a[0] = 0; a[1] = 0; a[2] = 0; }
       appliedRootY = 0;
       root.position.set(0, 0, 0);
@@ -3828,7 +3929,9 @@
       // 只读诊断出口：动作状态是闭包变量，外部脚本看不到，排查时全靠这个
       dbg: {
         get: () => ({
-          name: curName, loop: curLoop, ended, t: +curT.toFixed(3), blend: +blendT.toFixed(2),
+          name: curName, loop: curLoop, ended, hold: curHold, t: +curT.toFixed(3), blend: +blendT.toFixed(2),
+          blending: blending ? 1 : 0, blendTime: +blendTime.toFixed(3), blendSteps, dt: +lastDt.toFixed(4),
+          stepPeak: +stepPeak.toFixed(3),
           mv: dbg.mv, want: +dbg.want.toFixed(2), wantAnim: dbg.wantAnim,
           cd: +dbg.cd.toFixed(3), blocked: dbg.blocked, sp: +dbg.sp.toFixed(2), gaitIn: dbg.gaitIn
         }),

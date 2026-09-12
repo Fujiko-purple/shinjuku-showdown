@@ -369,17 +369,29 @@
     const h = px2 * 0.7;
     const x = (px2 - w) / 2;
     const y = (px2 - h) / 2;
-    ctx2.fillStyle = "rgba(9,10,14,0.62)";
+    // 先画一块「挖补」再整体羽化：硬边矩形在夜里会读成"地上贴了黑纸"（Lead 报的硬边黑矩形）
+    ctx2.fillStyle = "rgba(12,13,18,0.5)";
     ctx2.fillRect(x, y, w, h);
     for (let i = 0; i < px2 * 2.2; i++) {
       const px3 = x + rng.next() * w;
       const py3 = y + rng.next() * h;
-      ctx2.fillStyle = rng.next() < 0.5 ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.22)";
+      ctx2.fillStyle = rng.next() < 0.5 ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.18)";
       ctx2.fillRect(px3, py3, 1 + rng.next() * 4, 1 + rng.next() * 3);
     }
-    ctx2.strokeStyle = "rgba(0,0,0,0.9)";
-    ctx2.lineWidth = Math.max(2, px2 * 0.018);
+    // 很淡的接缝（不再是硬黑描边）
+    ctx2.strokeStyle = "rgba(0,0,0,0.18)";
+    ctx2.lineWidth = Math.max(2, px2 * 0.012);
     ctx2.strokeRect(x, y, w, h);
+    // 羽化：用 destination-in 乘一层径向 alpha，四角与四边全部渐隐
+    ctx2.globalCompositeOperation = "destination-in";
+    const feather = ctx2.createRadialGradient(px2 / 2, px2 / 2, 0, px2 / 2, px2 / 2, Math.max(w, h) * 0.62);
+    feather.addColorStop(0, "rgba(255,255,255,1)");
+    feather.addColorStop(0.62, "rgba(255,255,255,0.92)");
+    feather.addColorStop(0.86, "rgba(255,255,255,0.35)");
+    feather.addColorStop(1, "rgba(255,255,255,0)");
+    ctx2.fillStyle = feather;
+    ctx2.fillRect(0, 0, px2, px2);
+    ctx2.globalCompositeOperation = "source-over";
     paintCracks(ctx2, px2, px2, rng, 10, "rgba(0,0,0,0.7)", Math.max(1, px2 * 0.006));
     return canvas2;
   }
@@ -823,8 +835,11 @@
       const t = (i + 0.5) / rows;
       const y = i / rows * px2;
       const h = px2 / rows + 1;
-      const halfW = (0.045 + 0.455 * t) * px2;
-      const alpha = (1 - t * 0.94) * 0.9;
+      // 沿街暖雾的元凶就是把「宽 + 亮」的圆锥一层层加法叠起来：
+      // 这里把锥体收窄（0.455→0.30）、亮度按 (1-t)^1.8 快速衰减，
+      // 只在灯头附近留一段真正像光锥的内容，底部基本归零。
+      const halfW = (0.04 + 0.32 * t) * px2;
+      const alpha = Math.pow(1 - t, 1.7) * 0.95;
       const grad = ctx2.createLinearGradient(px2 / 2 - halfW, 0, px2 / 2 + halfW, 0);
       grad.addColorStop(0, "rgba(255,255,255,0)");
       grad.addColorStop(0.5, "rgba(255,255,255," + alpha.toFixed(3) + ")");
@@ -985,6 +1000,28 @@ vec2 cityFacadeUv( vec2 auv, vec3 an ) {
     return mat;
   }
 
+  // ---------------------------------------------------------------------------
+  //  加法图层随距离衰减：把「几十层加法叠成一片暖雾」的根源掐掉
+  //  近处（≤near）保持完整，远处（≥far）完全消失 —— 近景光斑观感不变。
+  //  low 档可以把 far 设得很小，直接等效关闭（仍然是同一个 mesh / draw call）。
+  // ---------------------------------------------------------------------------
+  function applyDistanceFade(mat, near, far) {
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uFadeNear = { value: near };
+      shader.uniforms.uFadeFar = { value: far };
+      shader.vertexShader = "varying float vCityDist;\n" + shader.vertexShader.replace(
+        "#include <project_vertex>",
+        "#include <project_vertex>\n\tvCityDist = length( mvPosition.xyz );"
+      );
+      shader.fragmentShader = "uniform float uFadeNear;\nuniform float uFadeFar;\nvarying float vCityDist;\n" + shader.fragmentShader.replace(
+        "#include <map_fragment>",
+        "#include <map_fragment>\n\tdiffuseColor.a *= 1.0 - smoothstep( uFadeNear, uFadeFar, vCityDist );"
+      );
+    };
+    mat.customProgramCacheKey = () => "city-distfade-" + near + "-" + far;
+    return mat;
+  }
+
   // 图集材质：用实例属性 aCell 选格子（霓虹 / 店铺 / 贩卖机共用）
   function makeAtlasMaterial(map, cols, rows, opt) {
     const o = opt || {};
@@ -1033,6 +1070,7 @@ vec3 bbScale = vec3( 1.0 );
 #endif
 vec4 mvPosition = modelViewMatrix * bbCenter;
 mvPosition.xy += position.xy * bbScale.xy;
+vBillboardDist = length( mvPosition.xyz );
 gl_Position = projectionMatrix * mvPosition;
 `;
   function makeBillboardMaterial(map, color, opt) {
@@ -1046,10 +1084,21 @@ gl_Position = projectionMatrix * mvPosition;
       side: DoubleSide,
       fog: true
     });
+    // 距离衰减：近处（≤fadeNear）保持完整观感，远处（≥fadeFar）完全消失。
+    // 沿街平视时中段之所以糊成暖雾，就是几十个远处光锥叠在同一片像素上；
+    // 近处那盏灯的光锥不受影响，所以"单灯光斑观感"不会变弱。
+    const fadeNear = o.fadeNear === void 0 ? 18 : o.fadeNear;
+    const fadeFar = o.fadeFar === void 0 ? 52 : o.fadeFar;
     mat.onBeforeCompile = (shader) => {
-      shader.vertexShader = shader.vertexShader.replace("#include <project_vertex>", BILLBOARD_CHUNK);
+      shader.uniforms.uFadeNear = { value: fadeNear };
+      shader.uniforms.uFadeFar = { value: fadeFar };
+      shader.vertexShader = "varying float vBillboardDist;\n" + shader.vertexShader.replace("#include <project_vertex>", BILLBOARD_CHUNK);
+      shader.fragmentShader = "uniform float uFadeNear;\nuniform float uFadeFar;\nvarying float vBillboardDist;\n" + shader.fragmentShader.replace(
+        "#include <map_fragment>",
+        "#include <map_fragment>\n\tdiffuseColor.a *= 1.0 - smoothstep( uFadeNear, uFadeFar, vBillboardDist );"
+      );
     };
-    mat.customProgramCacheKey = () => "city-billboard";
+    mat.customProgramCacheKey = () => "city-billboard-" + fadeNear + "-" + fadeFar;
     return mat;
   }
 
@@ -1242,7 +1291,19 @@ gl_Position = projectionMatrix * mvPosition;
             const mid = bi + bj === 1;
             const wx = (lx) => sx * (K + lx);
             const wz = (lz) => sz * (M + lz);
+            // 本街区的占位表：同一街区内禁止任何两个足迹相交
+            // （塔楼原本是随机落位，实测出现 31 对重叠、最大重叠面积 320m²）
+            const placed = [];
+            const fits = (lx0, lz0, lx1, lz1) => {
+              for (let q = 0; q < placed.length; q++) {
+                const p = placed[q];
+                if (lx0 < p[2] && lx1 > p[0] && lz0 < p[3] && lz1 > p[1]) return false;
+              }
+              return true;
+            };
             const mk = (lx0, lz0, lx1, lz1, h, tag) => {
+              if (!fits(lx0, lz0, lx1, lz1)) return false;
+              placed.push([lx0, lz0, lx1, lz1]);
               const w = lx1 - lx0;
               const d = lz1 - lz0;
               const dirs = [];
@@ -1255,6 +1316,7 @@ gl_Position = projectionMatrix * mvPosition;
                 dirs.push({ nx: sx, nz: 0, avenue: false }, { nx: -sx, nz: 0, avenue: false }, { nx: 0, nz: sz, avenue: false }, { nx: 0, nz: -sz, avenue: false });
               }
               push(wx((lx0 + lx1) / 2), wz((lz0 + lz1) / 2), w, d, h, dirs, tag);
+              return true;
             };
             // ---- 转角楼：同时占两条临街面 ----
             const cornerW = rng.range(16, 22);
@@ -1284,13 +1346,16 @@ gl_Position = projectionMatrix * mvPosition;
             // ---- 街区内部：塔楼（越靠路口越高，形成天际线层次）----
             const towerCount = near ? 3 : (mid ? 3 : 2);
             for (let t = 0; t < towerCount; t++) {
-              const tw = rng.range(14, 24);
-              const td = rng.range(14, 24);
-              const lx0 = clamp2(rng.range(16, 30) + t * rng.range(0, 5), 10, S - tw - 2);
-              const lz0 = clamp2(rng.range(16, 30) + t * rng.range(0, 7), 10, S - td - 2);
               const falloff = Math.max(0.4, 1 - (bi + bj) * 0.2);
-              const h = rng.range(42, 150) * falloff;
-              mk(lx0, lz0, lx0 + tw, lz0 + td, h, "tower");
+              let ok = false;
+              for (let attempt = 0; attempt < 10 && !ok; attempt++) {
+                const tw = rng.range(14, 24);
+                const td = rng.range(14, 24);
+                const lx0 = clamp2(rng.range(12, 32) + t * rng.range(0, 5), 10, S - tw - 2);
+                const lz0 = clamp2(rng.range(12, 32) + t * rng.range(0, 7), 10, S - td - 2);
+                const h = rng.range(42, 150) * falloff;
+                ok = mk(lx0, lz0, lx0 + tw, lz0 + td, h, "tower");
+              }
             }
           }
         }
@@ -1964,10 +2029,12 @@ gl_Position = projectionMatrix * mvPosition;
       const poleH = 8.2;
       const pole = new CylinderGeometry(0.1, 0.15, poleH, 7, 1, true);
       pole.translate(0, poleH / 2, 0);
-      const arm = new BoxGeometry(2.4, 0.13, 0.17);
-      arm.translate(-1.2, poleH - 0.16, 0);
+      // 灯臂长度直接决定 camProp 的等效半径（camera.js 用几何体包围盒算 r）：
+      // 臂 1.7 + 灯头 0.7 → 半径 1.43m，落在相机「细杆不算糊脸」的 1.6m 阈值以内
+      const arm = new BoxGeometry(1.7, 0.13, 0.17);
+      arm.translate(-0.85, poleH - 0.16, 0);
       const head = new BoxGeometry(0.7, 0.16, 0.34);
-      head.translate(-2.3, poleH - 0.24, 0);
+      head.translate(-1.85, poleH - 0.24, 0);
       const geom = track(mergeGeoms([pole, arm, head]));
       pole.dispose();
       arm.dispose();
@@ -1981,7 +2048,7 @@ gl_Position = projectionMatrix * mvPosition;
         tmpQuat.setFromEuler(tmpEuler.set(0, rot, 0));
         mesh.setMatrixAt(i, tmpMat4.compose(tmpVec3.set(L.x, 0, L.z), tmpQuat, ONE));
         L.rot = rot;
-        L.hx = L.x + L.dx * 2.3;
+        L.hx = L.x + L.dx * 1.85;
         L.hz = L.z + L.dz * 2.3;
         L.hy = poleH - 0.24;
       });
@@ -2023,7 +2090,9 @@ gl_Position = projectionMatrix * mvPosition;
       // 地面光池：夜里最关键的一层（暖色椭圆的灯光洒在路面上）
       const poolTex = track(new CanvasTexture(makePoolTexture(cv, 128)));
       poolTex.colorSpace = SRGBColorSpace;
-      const poolMat = track(new MeshBasicMaterial({
+      // 光池同样是加法层，几十个光池沿街叠起来就是那条"暖亮带"：
+      // 近处光斑保持完整，25m 外的光池淡出（远处交给雾和霓虹自有层次）
+      const poolMat = track(applyDistanceFade(new MeshBasicMaterial({
         map: poolTex,
         transparent: true,
         blending: AdditiveBlending,
@@ -2031,14 +2100,16 @@ gl_Position = projectionMatrix * mvPosition;
         vertexColors: true,
         fog: true,
         side: DoubleSide
-      }));
+      }), quality2 === "low" ? 12 : 22, quality2 === "low" ? 34 : 62));
+      // 全局再收一档：光池仍是地面主要的可读光源，但沿街叠出来的亮带压住
+      poolMat.opacity = 0.75;
       const poolGeom = track(addWhiteColors(new PlaneGeometry(1, 1)));
       poolGeom.rotateX(-Math.PI / 2);
       // 光池列表：路灯 + 店铺外溢 + 路口补光（合成一个 draw call）
       const poolList = [];
       for (const L of usedLamps) {
-        const c = rng.range(0.13, 0.19);
-        poolList.push({ x: L.hx, z: L.hz, ry: L.rot, sx: 17, sz: 25, y: 0.12, r: c, g: c * 0.72, b: c * 0.44 });
+        const c = rng.range(0.135, 0.185);
+        poolList.push({ x: L.hx, z: L.hz, ry: L.rot, sx: 14, sz: 18, y: 0.12, r: c, g: c * 0.72, b: c * 0.44 });
       }
       const shopTint = [[1, 0.66, 0.3], [1, 0.5, 0.24], [0.95, 0.42, 0.55], [0.5, 0.85, 1], [1, 0.85, 0.55]];
       for (const s of [1, -1]) {
@@ -2060,13 +2131,13 @@ gl_Position = projectionMatrix * mvPosition;
           const k1 = Math.round(u / 23);
           const w1 = shopTint[((k1 + 5) % shopTint.length + shopTint.length) % shopTint.length];
           const w2 = shopTint[((k1 + 9) % shopTint.length + shopTint.length) % shopTint.length];
-          const ka = rng.range(0.05, 0.095) * wetAmt;
-          const kb = rng.range(0.042, 0.08) * wetAmt;
+          const ka = rng.range(0.036, 0.07) * wetAmt;
+          const kb = rng.range(0.03, 0.06) * wetAmt;
           poolList.push({
             x: s * rng.range(8.4, 10.8),
             z: u + wetStep * 0.5,
             ry: 0,
-            sx: rng.range(2.4, 4.0),
+            sx: rng.range(5.0, 8.0),
             sz: wetStep * rng.range(0.95, 1.25),
             y: 0.045,
             r: w1[0] * ka, g: w1[1] * ka, b: w1[2] * ka
@@ -2075,7 +2146,7 @@ gl_Position = projectionMatrix * mvPosition;
             x: u + wetStep * 0.5,
             z: s * rng.range(8.4, 10.8),
             ry: Math.PI / 2,
-            sx: rng.range(2.4, 4.0),
+            sx: rng.range(5.0, 8.0),
             sz: wetStep * rng.range(0.95, 1.25),
             y: 0.045,
             r: w2[0] * kb, g: w2[1] * kb, b: w2[2] * kb
@@ -2085,8 +2156,9 @@ gl_Position = projectionMatrix * mvPosition;
       // 信号灯在湿路上的反射（红/绿长条），位置跟着路口四角
       for (const a of [1, -1]) {
         for (const b3 of [1, -1]) {
-          poolList.push({ x: a * 6.5, z: b3 * 10.5, ry: 0, sx: 1.3, sz: 7.5, y: 0.05, r: 0.028 * wetAmt, g: 0.13 * wetAmt, b: 0.06 * wetAmt });
-          poolList.push({ x: a * 10.5, z: b3 * 6.5, ry: Math.PI / 2, sx: 1.3, sz: 7.5, y: 0.05, r: 0.028 * wetAmt, g: 0.13 * wetAmt, b: 0.06 * wetAmt });
+          // 原来是 1.3×7.5 的强拉伸 → 读成"细长绿线"。改成宽而淡的软光斑。
+          poolList.push({ x: a * 6.5, z: b3 * 10.5, ry: 0, sx: 5.5, sz: 9, y: 0.05, r: 0.016 * wetAmt, g: 0.055 * wetAmt, b: 0.03 * wetAmt });
+          poolList.push({ x: a * 10.5, z: b3 * 6.5, ry: Math.PI / 2, sx: 9, sz: 5.5, y: 0.05, r: 0.016 * wetAmt, g: 0.055 * wetAmt, b: 0.03 * wetAmt });
         }
       }
       // 路口中心补光：不然格斗区就是一块黑
@@ -2112,8 +2184,9 @@ gl_Position = projectionMatrix * mvPosition;
       if (Q.godray) {
         const shaftTex = track(new CanvasTexture(makeShaftTexture(cv, 128)));
         shaftTex.colorSpace = SRGBColorSpace;
-        const shaftMat = track(makeBillboardMaterial(shaftTex, 16762959));
-        shaftMat.opacity = 0.32;
+        // 不透明度按「最热的一次会话也要 <60」定档：跨会话实测同构建有 ±5 的场景状态浮动
+        const shaftMat = track(makeBillboardMaterial(shaftTex, 16762959, { fadeNear: 12, fadeFar: 30 }));
+        shaftMat.opacity = 0.07;
         const shaftGeom = track(new PlaneGeometry(1, 1));
         const shaftMesh = new InstancedMesh(shaftGeom, shaftMat, usedLamps.length);
         shaftMesh.name = "lamp-shafts";
@@ -2134,11 +2207,15 @@ gl_Position = projectionMatrix * mvPosition;
     let pedLens = null;
     if (Q.signals) {
       const R = ROAD_HALF + 1.9;
+      // 悬臂长度 = camProp 等效半径的一半：原来 7.9m 悬臂让相机把每个路口角
+      // 当成「半径 4.28m 的实心柱」，会误判遮挡。改成 1.5m（灯头挂在路缘上方），
+      // 半径降到 1.46m，仍在路口一眼能认，但不再制造幻影遮挡体。
+      const ARM = 1.5;
       const heads = [
-        { px: R, pz: -R, dx: -1, dz: 0, hx: 6, hz: -R, face: "z+", group: 0 },
-        { px: -R, pz: R, dx: 1, dz: 0, hx: -6, hz: R, face: "z-", group: 0 },
-        { px: R, pz: R, dx: 0, dz: -1, hx: R, hz: 6, face: "x-", group: 1 },
-        { px: -R, pz: -R, dx: 0, dz: 1, hx: -R, hz: -6, face: "x+", group: 1 }
+        { px: R, pz: -R, dx: -1, dz: 0, hx: R - ARM, hz: -R, face: "z+", group: 0 },
+        { px: -R, pz: R, dx: 1, dz: 0, hx: -(R - ARM), hz: R, face: "z-", group: 0 },
+        { px: R, pz: R, dx: 0, dz: -1, hx: R, hz: R - ARM, face: "x-", group: 1 },
+        { px: -R, pz: -R, dx: 0, dz: 1, hx: -R, hz: -(R - ARM), face: "x+", group: 1 }
       ];
       const poleH = 6.4;
       const armLen = Math.hypot(heads[0].hx - heads[0].px, heads[0].hz - heads[0].pz);
@@ -2146,9 +2223,10 @@ gl_Position = projectionMatrix * mvPosition;
       poleGeom.translate(0, poleH / 2, 0);
       const armGeom = new BoxGeometry(armLen, 0.13, 0.16);
       armGeom.translate(armLen / 2, poleH - 0.22, 0);
-      const braceGeom = new BoxGeometry(1.7, 0.09, 0.1);
-      braceGeom.rotateZ(-0.62);
-      braceGeom.translate(0.55, poleH - 1.0, 0);
+      // 斜撑必须朝 -x（悬臂那侧），否则会把几何体包围盒顶到 +x，camProp 半径又变回去
+      const braceGeom = new BoxGeometry(1.15, 0.08, 0.1);
+      braceGeom.rotateZ(0.72);
+      braceGeom.translate(-0.45, poleH - 0.85, 0);
       const sigGeom = track(mergeGeoms([poleGeom, armGeom, braceGeom]));
       const sigMat = track(new MeshLambertMaterial({ color: 4342851 }));
       const sigPoles = new InstancedMesh(sigGeom, sigMat, heads.length);
@@ -2513,7 +2591,7 @@ gl_Position = projectionMatrix * mvPosition;
         const s = rng.range(0.1, 0.5);
         set(
           p.x + rng.range(-1.2, 1.2),
-          s * 0.4,
+          s * 0.62,
           p.z + rng.range(-1.2, 1.2),
           rng.range(0, TAU),
           s * rng.range(0.9, 1.6),
@@ -2587,7 +2665,8 @@ gl_Position = projectionMatrix * mvPosition;
       mesh.renderOrder = 1;
       list.forEach((it, i) => {
         tmpQuat.identity();
-        mesh.setMatrixAt(i, tmpMat4.compose(tmpVec3.set(it.x, 0.05, it.z), tmpQuat, tmpScale.set(it.w, 1, it.d)));
+        // 必须画在人行道面（y=CURB_H）之上：原来放 0.05 被人行道板整个盖住，等于没画
+        mesh.setMatrixAt(i, tmpMat4.compose(tmpVec3.set(it.x, CURB_H + 0.02, it.z), tmpQuat, tmpScale.set(it.w, 1, it.d)));
       });
       mesh.instanceMatrix.needsUpdate = true;
       group.add(mesh);
@@ -2614,7 +2693,7 @@ gl_Position = projectionMatrix * mvPosition;
       group.add(mesh);
       for (let i = 0; i < n; i++) {
         const p = roadPoint();
-        const s = rng.range(4.5, 11);
+        const s = rng.range(3.2, 7);
         tmpQuat.setFromEuler(tmpEuler.set(0, rng.chance(0.5) ? 0 : Math.PI / 2 + rng.range(-0.2, 0.2), 0));
         mesh.setMatrixAt(i, tmpMat4.compose(tmpVec3.set(p.x, 0.02, p.z), tmpQuat, tmpScale.set(s, 1, s * rng.range(0.6, 1.1))));
       }
@@ -3322,9 +3401,55 @@ gl_Position = projectionMatrix * mvPosition;
       sweepMesh = null;
       sweepPivot = null;
     }
+    // ------------------------------------------------------------------------
+    //  建筑碰撞查询（供 combat.js 调用）
+    //  现状：全项目没有任何「角色 vs 建筑」的移动解算 —— combat.js 里的 BuildingGrid
+    //  只用于撞墙伤害与 AI 找掩体，角色可以直接走进楼里（probe-city-run 实测最深 6.3m）。
+    //  这里只提供查询，不改变任何现有行为；移动解算在 combat.js 的积分步骤里调用即可：
+    //      city.pushOut(c.p, CAPSULE_R);
+    //  建筑都是轴对齐盒（rotY=0），所以用「AABB 最近点」推挤，角色能贴着墙面走。
+    // ------------------------------------------------------------------------
+    function pushOut(p, r) {
+      let pushed = 0;
+      const rad = r || 0.4;
+      for (let i = 0; i < buildings.length; i++) {
+        const b = buildings[i];
+        if (b.destroyed) continue;
+        const hx = b._w * 0.5;
+        const hz = b._d * 0.5;
+        const cx = clamp2(p.x, b._x - hx, b._x + hx);
+        const cz = clamp2(p.z, b._z - hz, b._z + hz);
+        let dx = p.x - cx;
+        let dz = p.z - cz;
+        const d2 = dx * dx + dz * dz;
+        if (d2 > rad * rad) continue;
+        if (d2 > 1e-8) {
+          const d = Math.sqrt(d2);
+          const k = (rad - d) / d;
+          p.x += dx * k;
+          p.z += dz * k;
+          pushed += rad - d;
+        } else {
+          // 圆心已经在盒子内部：沿最近的一面推出去
+          const ox = hx - Math.abs(p.x - b._x);
+          const oz = hz - Math.abs(p.z - b._z);
+          if (ox < oz) {
+            const s = p.x >= b._x ? 1 : -1;
+            p.x = b._x + s * (hx + rad);
+            pushed += ox + rad;
+          } else {
+            const s = p.z >= b._z ? 1 : -1;
+            p.z = b._z + s * (hz + rad);
+            pushed += oz + rad;
+          }
+        }
+      }
+      return pushed;
+    }
     return {
       group,
       buildings,
+      pushOut,
       groundSize: GROUND_SIZE,
       groundTexture: asphaltTex,
       update: update2,
