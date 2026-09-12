@@ -1658,6 +1658,42 @@ html.is-touch .controls-grid { display: none !important; }
 
   function el(id) { return document.getElementById(id); }
 
+  /** 原始加载文案（游戏起来之后要还原回去） */
+  var LOADING_TEXT0 = (function () {
+    var lt = document.querySelector('#loading .loading-text');
+    return (lt && lt.textContent) || '加载中';
+  })();
+
+  /**
+   * 撤掉看门狗面板。
+   * ⚠ 这里修的是一个真实事故：首屏要下载 2.5MB 的 game.js，慢网络/首次访问时
+   *   「页面已加载但主程序还没执行」是**正常状态**，而旧版 4 秒就画上「主程序未能启动」，
+   *   而且画出来就永不消失 —— 游戏随后明明正常起来了，玩家看到的却是一个盖在标题画面上的报错框。
+   * 现在主程序一旦启动成功，立刻撤面板、还原加载文案。
+   */
+  function clearDiag() {
+    var d = el('boot-diag');
+    if (d) { d.className = 'boot-diag hidden'; d.innerHTML = ''; }
+    var sp = document.querySelector('#loading .spin');
+    if (sp) sp.style.animation = '';
+    var lt = document.querySelector('#loading .loading-text');
+    if (lt) lt.textContent = LOADING_TEXT0;
+  }
+
+  /** 脚本还在下载 = 只是慢，不是坏了 */
+  function gameScriptLoading() {
+    try {
+      var rs = window.performance && performance.getEntriesByType ? performance.getEntriesByType('resource') : [];
+      for (var i = 0; i < rs.length; i++) {
+        var n = rs[i].name || '';
+        if (n.indexOf('game.js') >= 0 || n.indexOf('%E6%96%B0%E5%AE%BF') >= 0 || n.indexOf('新宿决战') >= 0) {
+          return !rs[i].responseEnd || rs[i].duration === 0;
+        }
+      }
+    } catch (e) { /* 忽略 */ }
+    return false;
+  }
+
   function render(title, detail) {
     var d = el('boot-diag');
     if (!d) return;
@@ -1710,18 +1746,30 @@ html.is-touch .controls-grid { display: none !important; }
     BOOT.err = '未处理的 Promise 异常: ' + ((e.reason && e.reason.message) || e.reason);
   });
 
-  /* ---- 3. 定时体检 ---- */
+  /* ---- 3. 定时体检 ----
+   * 第一次判定从 4s 推迟到 9s（首次冷启动要下载 2.5MB 脚本 + 生成城市，4 秒远远不够），
+   * 并且脚本仍在下载时只给「仍在加载」的温和提示，不判死。 */
   var CHECKS = [
-    { at: 4000, what: '主程序未能启动' },
-    { at: 25000, what: '初始化超时' },
+    { at: 9000, what: '主程序未能启动' },
+    { at: 32000, what: '初始化超时' },
   ];
   var idx = 0;
 
   setInterval(function () {
+    /* 主程序已启动：不管之前画过什么，一律撤掉 */
+    if (window.__BOOT && window.__BOOT.ok) { clearDiag(); return; }
     if (BOOT.ok) return;
     var elapsed = Date.now() - BOOT.started;
     while (idx < CHECKS.length && elapsed >= CHECKS[idx].at) {
-      var c = CHECKS[idx++];
+      var c = CHECKS[idx];
+      /* 只是还在下载脚本 —— 慢，不是坏。给温和提示，不再升级成「无法启动」 */
+      if (c.what === '主程序未能启动' && gameScriptLoading()) {
+        idx++;
+        render('仍在加载', '游戏脚本（约 2.5MB）还在下载中，首次访问会慢一些。<br>' +
+          '请再等一会儿；若超过 30 秒仍未进入，刷新页面重试即可。');
+        continue;
+      }
+      idx++;
       var detail;
       if (c.what === '主程序未能启动') {
         detail =
