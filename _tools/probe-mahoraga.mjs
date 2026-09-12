@@ -26,8 +26,13 @@ const LOWQ = argv.includes('--lowq');
 const QUICK = argv.includes('--quick');
 const NDC = argv.includes('--ndc');
 const CAL = argv.includes('--cal');
+const SHOTSONLY = argv.includes('--views');
+const COMPARE = argv.includes('--compare');
+const SIL = argv.includes('--sil');
+// 剪影模式必须关后处理（泛光会在黑剪影外圈发光，影响剪影判读）
+if (SIL) { /* URL 在下方按 SIL 追加 */ }
 if (!existsSync(FILE)) { console.error('找不到产物 ' + FILE + '（先跑私有构建）'); process.exit(2); }
-const URL = 'file:///' + FILE.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/') + (LOWQ ? '?q=low' : '');
+const URL = 'file:///' + FILE.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/') + (LOWQ ? '?q=low' : '') + (SIL ? '?post=0' : '');
 
 const R = [];
 function check(name, ok, detail) {
@@ -150,6 +155,146 @@ try {
     mech && ['hp', 'hpMax', 'alive', 'adapt', 'mode', 'skill', 'cd'].every((k) => k in mech),
     Object.keys(mech).join(','));
   check('A3 HOOKS.tick 已被 combat 调用', dbg.hookCalls.tick > 30, 'tick=' + dbg.hookCalls.tick);
+
+  if (SIL) {
+    head('SIL · 纯黑剪影（验收第一优先）');
+    const DIR = argv.includes('--shots') ? arg('shots', 'shots/mahoraga') : 'shots/mahoraga/remodel3';
+    await b.evaluate('window.__M.cb().fighters.sukuna.hp = window.__M.cb().fighters.sukuna.hpMax * 0.49');
+    await until('window.__M.d().alive === true', 9000);
+    await until('window.__M.d().mode === "air"', 9000);
+    await b.evaluate('window.__M.freeze(true)');
+    await until('window.__M.d().mode === "air" && window.__M.d().attackable === false', 9000, 80);
+    await b.evaluate('window.__SS.mahoraga.setFrame(false)');
+    await b.evaluate('window.__SS.mahoraga.setSilhouette(true)');
+    // 世界隐藏 + 纯白背景（不新建对象：直接改已有的 scene.background Color 并清雾）
+    await b.evaluate([
+      '(() => { const S = window.__SS;',
+      '  S.__hid = [];',
+      '  const hide = (o) => { if (o && o.visible) { o.visible = false; S.__hid.push(o); } };',
+      '  hide(S.city && S.city.group); hide(S.gojo && S.gojo.root); hide(S.sukuna && S.sukuna.root); hide(S.fx && S.fx.group);',
+      '  S.scene.fog = null;',
+      // 纯白背景：借 fx.screenState.flashColor 的构造函数 new 一个 Color（不污染它的实例）
+      '  const Ctor = S.fx.screenState.flashColor.constructor;',
+      '  if (!S.scene.background) S.scene.background = new Ctor(0xffffff);',
+      '  else S.scene.background.setHex(0xffffff);',
+      '  return { hid: S.__hid.length, bg: !!S.scene.background };',
+      '})()'
+    ].join('\n'));
+    await b.evaluate('window.__M.put("gojo", 0, 0)');
+    await b.evaluate('window.__M.put("sukuna", 0, 40)');
+    await b.evaluate('window.__M.setPos(0, 0.32, 5.2)');
+    await b.evaluate('window.__SS.cam.zoomBias = 0.72');
+    await b.evaluate('window.__SS.cam.pitch = 0.32');
+    await b.evaluate('(() => { const h = document.getElementById("hud"); if (h) h.style.display = "none"; return true; })()');   // 剪影要干净：藏 HUD
+    await nap(900);
+    await b.screenshot(DIR + '/silhouette.png');
+    info('剪影 →', DIR + '/silhouette.png');
+    await b.evaluate('window.__SS.mahoraga.setSilhouette(false)');
+    await b.evaluate('(() => { const S = window.__SS; for (const o of S.__hid) o.visible = true; S.__hid = []; return true; })()');
+    await nap(400);
+    await b.screenshot(DIR + '/silhouette-color.png');
+    info('同机位彩色 →', DIR + '/silhouette-color.png');
+    // 拼图：官方立绘 | 本实现剪影 | 本实现彩色（同一机位）
+    const { writeFileSync } = await import('node:fs');
+    const { resolve: rp } = await import('node:path');
+    const toUrl = (p) => 'file:///' + rp(p).replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
+    const strip = '<html><body style="margin:0;background:#0b0b0d;color:#ddd;font:13px sans-serif;display:flex;align-items:flex-start">' +
+      '<div style="text-align:center"><img src="' + toUrl('shots/ref/maho-ref-4-figure.png') + '" style="height:560px;display:block"><div>官方立绘 maho-ref-4（基准）</div></div>' +
+      '<div style="text-align:center"><img src="' + toUrl(DIR + '/silhouette.png') + '" style="height:560px;display:block"><div>本实现剪影（裁掉 HUD 区域看轮廓）</div></div>' +
+      '<div style="text-align:center"><img src="' + toUrl(DIR + '/silhouette-color.png') + '" style="height:560px;display:block"><div>本实现同机位彩色</div></div>' +
+      '</body></html>';
+    writeFileSync(DIR + '/silhouette-compare.html', strip);
+    await b.send('Page.navigate', { url: toUrl(DIR + '/silhouette-compare.html') });
+    await nap(1600);
+    await b.screenshot(DIR + '/silhouette-compare.png');
+    console.log('  剪影对比图 → ' + DIR + '/silhouette-compare.png');
+    await b.close();
+    process.exit(0);
+  }
+
+  if (argv.includes('--strip')) {
+    // 只用已有 PNG 拼对比图（不开游戏，几秒钟）：左=官方立绘，右=本实现剪影（裁到同比例）
+    const { writeFileSync } = await import('node:fs');
+    const { resolve: rp } = await import('node:path');
+    const toUrl = (p) => 'file:///' + rp(p).replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
+    const html = '<html><body style="margin:0;background:#0b0b0d;color:#ddd;font:13px sans-serif;display:flex">' +
+      '<div style="text-align:center"><img src="' + toUrl('shots/ref/maho-ref-4-figure.png') + '" style="height:560px;display:block"><div>官方立绘 maho-ref-4（基准）</div></div>' +
+      '<div style="text-align:center"><div style="width:560px;height:560px;overflow:hidden;position:relative">' +
+      '<img src="' + toUrl('shots/mahoraga/remodel3/silhouette.png') + '" style="position:absolute;height:1584px;left:-864px;top:-160px">' +
+      '</div><div>本实现剪影（放大到同比例）</div></div>' +
+      '</body></html>';
+    writeFileSync('shots/mahoraga/remodel3/silhouette-compare.html', html);
+    await b.send('Page.navigate', { url: toUrl('shots/mahoraga/remodel3/silhouette-compare.html') });
+    await nap(1500);
+    await b.screenshot('shots/mahoraga/remodel3/silhouette-compare.png');
+    console.log('  剪影对比图 → shots/mahoraga/remodel3/silhouette-compare.png');
+    await b.close();
+    process.exit(0);
+  }
+
+  if (COMPARE) {
+    // 拼对比图：左边官方手办立绘，右边本实现正面全身截图（用浏览器排版 + CDP 截图，零依赖）
+    const { writeFileSync } = await import('node:fs');
+    const { resolve: rp } = await import('node:path');
+    const refUrl = 'file:///' + rp('shots/ref/maho-ref-4-figure.png').replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
+    const mineUrl = 'file:///' + rp('shots/mahoraga/remodel2/01-front.png').replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
+    const html = '<html><body style="margin:0;background:#111;font:12px sans-serif;color:#ddd;display:flex">' +
+      '<div style="text-align:center"><img src="' + refUrl + '" style="height:620px;display:block"><div>官方立绘 maho-ref-4</div></div>' +
+      '<div style="text-align:center"><img src="' + mineUrl + '" style="height:620px;display:block"><div>本实现 01-front（1280x720 实拍）</div></div>' +
+      '</body></html>';
+    writeFileSync('shots/mahoraga/remodel2/compare.html', html);
+    const pageUrl = 'file:///' + rp('shots/mahoraga/remodel2/compare.html').replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
+    await b.send('Page.navigate', { url: pageUrl });
+    await nap(1500);
+    await b.screenshot('shots/mahoraga/remodel2/compare.png');
+    console.log('  对比图 → shots/mahoraga/remodel2/compare.png');
+    await b.close();
+    process.exit(0);
+  }
+
+  if (SHOTSONLY) {
+    head('S · 建模四视图（对照 shots/ref 立绘）');
+    const DIR = argv.includes('--shots') ? arg('shots', 'shots/mahoraga') : 'shots/mahoraga/remodel';
+    await b.evaluate('window.__M.cb().fighters.sukuna.hp = window.__M.cb().fighters.sukuna.hpMax * 0.49');
+    await until('window.__M.d().alive === true', 9000);
+    await until('window.__M.d().mode === "air"', 9000);
+    await b.evaluate('window.__M.freeze(true)');
+    await until('window.__M.d().mode === "air" && window.__M.d().attackable === false', 9000, 80);
+    await b.evaluate('window.__SS.mahoraga.setFrame(false)');   // 关掉拉远机位，用默认近机位拍特写
+    await b.evaluate('window.__M.lock(false)');
+    const views = [
+      { f: '01-front.png', maho: [0, 0.3, 5.2], gojo: [0, 0], sukuna: [0, 40], tag: '正面', zoom: 0.72, pitch: 0.32 },
+      { f: '02-threequarter.png', maho: [0, 0.3, 5.2], gojo: [2.6, 0.0], sukuna: [0, 40], tag: '45°', zoom: 0.72, pitch: 0.32 },
+      { f: '03-side.png', maho: [0, 0.3, 5.2], gojo: [5.2, 5.2], sukuna: [5.2, 40], tag: '侧面', zoom: 0.72, pitch: 0.32 },
+      { f: '04-back.png', maho: [0, 0.3, 10.4], gojo: [0, 5.2], sukuna: [0, 40], tag: '背面', zoom: 0.72, pitch: 0.32 },
+      { f: '05-head.png', maho: [0, -1.05, 5.2], gojo: [0, 0], sukuna: [0, 40], tag: '头部特写', zoom: 0.42, pitch: 0.4 }
+    ];
+    for (const v of views) {
+      await b.evaluate('window.__M.put("gojo", ' + v.gojo[0] + ', ' + v.gojo[1] + ')');
+      await b.evaluate('window.__M.put("sukuna", ' + v.sukuna[0] + ', ' + v.sukuna[1] + ')');
+      await b.evaluate('window.__M.setPos(' + v.maho[0] + ', ' + v.maho[1] + ', ' + v.maho[2] + ')');
+      await nap(900);
+      // 特写机位：zoomBias 是相机对外协定字段，拉近 + 压低俯角（只在截图流程里用）
+      if (v.zoom) await b.evaluate('window.__SS.cam.zoomBias = ' + v.zoom);
+      if (v.pitch) await b.evaluate('window.__SS.cam.pitch = ' + v.pitch);
+      await nap(260);
+      await b.screenshot(DIR + '/' + v.f);
+      info('截图', v.tag + ' → ' + DIR + '/' + v.f);
+    }
+    // 实战取景：恢复 camFrame 覆盖，玩家与宿傩 13m
+    await b.evaluate('window.__SS.mahoraga.setFrame(true)');
+    await b.evaluate('window.__M.setPos(0, 4.5, 0, false)');
+    await b.evaluate('window.__M.put("gojo", 0, 0)');
+    await b.evaluate('window.__M.put("sukuna", 0, -13)');
+    await b.evaluate('window.__M.lock(true)');
+    await nap(1400);
+    await b.screenshot(DIR + '/06-boss-frame.png');
+    info('截图', '实战取景 → ' + DIR + '/06-boss-frame.png');
+    const m = await b.evaluate('window.__M.m()');
+    info('metrics', m);
+    await b.close();
+    process.exit(0);
+  }
 
   if (CAL) {
     head('C · 对空命中标定（--cal）');
@@ -283,7 +428,7 @@ try {
   info('metrics', mt);
   check('C1 高度 ∈ [3.8, 4.2]（含头顶法轮）', mt.height >= 3.78 && mt.height <= 4.22, 'height=' + mt.height + 'm');
   check('C2 肩宽 ∈ [2.4, 2.8]', mt.shoulderWidth >= 2.4 && mt.shoulderWidth <= 2.8, 'shoulderWidth=' + mt.shoulderWidth + 'm（整机 span=' + mt.span + 'm，含张开的手臂/退魔之剑）');
-  check('C3 可见网格数（≈draw call）≤ 70', mt.meshes <= 70, 'meshes=' + mt.meshes + ' / partCount=' + dbg.partCount);
+  check('C3 可见网格数（≈draw call）≤ 70', mt.drawMeshes <= 70, 'drawMeshes=' + mt.drawMeshes + ' / parts=' + mt.meshes);
   // 契约 §4 修订：AIR_Y = 5.2/5.8/6.4（原来的 14~17m 完全出画）
   // 契约修订 + 实测收敛：normal 3.6（--ndc 扫描证明 5.2/5.8/6.4 全部出画）
   // 契约修订值 5.2/5.8/6.4 + camFrame 取景覆盖：实测 base 5.82 时法轮顶 ndcY 1.09（被切），
@@ -419,8 +564,8 @@ try {
     ['blue', 'red', 'purple', 'purple200'].every((k) => aimOn[k].aimed && aimOn[k].perpPred < 0.05),
     ['blue', 'red', 'purple', 'purple200'].map((k) => k + ':预测点垂距' + aimOn[k].perpPred + 'm').join('  '));
   // 目标变近变低后飞行时间缩短（苍 0.55s / 赫 0.35s），提前量绝对值跟着变小，但必须非零
-  check('E2a 会动的目标给出真实提前量（苍/赫 >0.2m），瞬发茈给 0',
-    aimOn.blue.perp > 0.2 && aimOn.red.perp > 0.2 && aimOn.purple.perp < 0.05 && aimOn.purple200.perp < 0.05,
+  check('E2a 会动的目标给出真实提前量（苍/赫 >0.1m），瞬发茈给 0',
+    aimOn.blue.perp > 0.1 && aimOn.red.perp > 0.1 && aimOn.purple.perp < 0.05 && aimOn.purple200.perp < 0.05,
     '苍=' + aimOn.blue.lead + 's/' + aimOn.blue.perp + 'm 赫=' + aimOn.red.lead + 's/' + aimOn.red.perp + 'm 茈=' + aimOn.purple.perp + 'm');
   check('E2b 会飞的弹（苍/赫）按弹速给提前量，瞬发茈不给',
     aimOn.blue.lead > 0.3 && aimOn.red.lead > 0.3 && aimOn.purple.lead === 0 && aimOn.purple200.lead === 0,

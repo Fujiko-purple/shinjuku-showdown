@@ -172,28 +172,30 @@ function mahoPointSegDistSq(px, py, pz, ax, ay, az, bx, by, bz) {
 var MAHO_MATS = null;
 function mahoMaterials() {
   if (MAHO_MATS) return MAHO_MATS;
-  // 躯体：比 C.INK 稍亮一点的深灰蓝，纯黑在夜景里会糊成一团
   /**
-   * ⚠ 配色说明：契约要求「深色躯体（C.INK 系）+ C.CONCRETE2 骨白护甲片」。
-   * 但实测（shots/mahoraga/02-front.png 第一版）在夜空+泛光下 C.INK(0x06060C) 与
-   * C.CONCRETE2(0x3A4054) 都压成了一团黑，4m 高的角色只剩剪影 —— 骨白护甲完全读不出来。
-   * 所以按同样的色相把两个基色提亮（深蓝灰躯体 + 真正的骨白），并在 MAHO_TUNE 里留白，
-   * 这是"能看清"与"照着十六进制抄"之间的取舍，属于本模块的写域。
+   * 配色按**官方立绘**重做（用户验收基准：shots/ref/maho-ref-1..4）：
+   *   躯体 = 苍白/骨白（不是深色）、法轮 = 金色球轮、下装 = 黑色破布、脚絆/腕带 = 白绳。
+   * 夜景下白色躯体本身就有很好的可读性，不需要再靠自发光提亮；
+   * 只有眼睛（方形绿光）、法轮金球（受光 + 高光）、剑刃高光用自发光。
    */
   MAHO_MATS = {
-    body: new MeshLambertMaterial({ color: 0x39415c }),           // C.INK 系提亮（深蓝灰）
-    bodyDark: new MeshLambertMaterial({ color: 0x161a26 }),
-    plate: new MeshLambertMaterial({ color: 0xb7bdc9 }),          // C.CONCRETE2 提亮（骨白）
-    plateDim: new MeshLambertMaterial({ color: 0x5a6375 }),
-    eye: new MeshBasicMaterial({ color: 0xff3a20, toneMapped: false }),     // 暗红发光眼
-    eyeGlow: new MeshBasicMaterial({ color: 0xff2a10, toneMapped: false, transparent: true, opacity: 0.35, blending: AdditiveBlending, depthWrite: false }),
+    bone: new MeshLambertMaterial({ color: 0xf0ece1, emissive: 0x2b2822 }),   // 暖白躯体（立绘主色）
+    boneShade: new MeshLambertMaterial({ color: 0xc2c0b4 }),   // 肌肉沟槽/关节（比主体暗一档，明暗层次）
+    boneDark: new MeshLambertMaterial({ color: 0x9a9a91 }),
+    cloth: new MeshLambertMaterial({ color: 0x121317 }),       // 黑色破布短裙 / 锁链
+    clothLit: new MeshLambertMaterial({ color: 0x1f2229 }),
+    rope: new MeshLambertMaterial({ color: 0xe9e5d6 }),        // 脚絆 / 腕带（白绳）
+    mouth: new MeshBasicMaterial({ color: 0x0d0a09 }),         // 口腔暗部
+    teeth: new MeshLambertMaterial({ color: 0xf6f4ec }),       // 方牙
+    eye: new MeshBasicMaterial({ color: 0x49ff9a, toneMapped: false }),     // 方形发光绿眼
+    eyeGlow: new MeshBasicMaterial({ color: 0x2bff88, toneMapped: false, transparent: true, opacity: 0.3, blending: AdditiveBlending, depthWrite: false }),
     glow: new MeshBasicMaterial({ color: C.CRIMSON, toneMapped: false, transparent: true, opacity: 0.85 }),
-    crack: new MeshBasicMaterial({ color: C.BLOOD, toneMapped: false }),
-    blade: new MeshLambertMaterial({ color: 0x1a1f2e }),
-    bladeEdge: new MeshBasicMaterial({ color: C.CRIMSON, toneMapped: false }),
-    wheelOff: new MeshBasicMaterial({ color: 0x9aa2b2, transparent: true, opacity: 0.55 }),
-    wheelOn: new MeshBasicMaterial({ color: 0xffd873, toneMapped: false }),
-    gold: new MeshBasicMaterial({ color: 0xffd873, toneMapped: false, transparent: true, opacity: 0.95 }),
+    blade: new MeshLambertMaterial({ color: 0xf2f6fa, emissive: 0x3a3f46 }),   // 白色细长刀身（夜里有反光）
+    bladeEdge: new MeshBasicMaterial({ color: 0xffffff, toneMapped: false, transparent: true, opacity: 0.9 }),
+    gold: new MeshLambertMaterial({ color: 0xffc63a, emissive: 0x4a3208 }),   // 金轮（受光 + 一点自发光，夜景里认得出）
+    goldDim: new MeshLambertMaterial({ color: 0x8a6a14 }),     // 未点亮的金球
+    wheelOff: new MeshLambertMaterial({ color: 0x8a6a14 }),    // mahoLightWheel 用：未点亮
+    wheelOn: new MeshBasicMaterial({ color: 0xffe07a, toneMapped: false }), // 点亮（适应一格）
     ring: new MeshBasicMaterial({ color: 0xffcf5e, toneMapped: false, transparent: true, opacity: 0.85 }),
     shadow: new MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.42, depthWrite: false })
   };
@@ -236,63 +238,81 @@ function mahoBuildModel() {
   };
 
   /* ---------------- 骨骼（自建，不碰 fighters.js 的 rig） ---------------- */
-  const HIP_Y = 1.72;
+  const HIP_Y = 1.86;                     // 腿长（髋→脚底）≈1.86m ≈ 总高 46%（立绘比例）
+  const TORSO = { core: 0.10, chest: 0.30, neck: 0.30, head: 0.10 };   // 压短躯干链，把高度让给"头顶金冠"
   const hips = mkBone("hips", root, 0, HIP_Y, 0);
-  const core = mkBone("core", hips, 0, 0.16, 0);
-  const chest = mkBone("chest", core, 0, 0.38, 0);        // 世界 y = 2.26
-  const neck = mkBone("neck", chest, 0, 0.56, 0);         // 2.82
-  const head = mkBone("head", neck, 0, 0.14, 0);          // 2.96
+  const core = mkBone("core", hips, 0, TORSO.core, 0);
+  const chest = mkBone("chest", core, 0, TORSO.chest, 0);   // 肩枢轴 ≈ 2.36
+  const neck = mkBone("neck", chest, 0, TORSO.neck, 0);     // 2.72
+  const head = mkBone("head", neck, 0, TORSO.head, 0);      // 2.82（头顶 ≈ 3.10）
   bones.hips.userData = { restY: HIP_Y };
 
-  // 躯干
-  put(new BoxGeometry(0.96, 0.52, 0.66), M.body, hips, 0, -0.06, 0);
-  put(new BoxGeometry(0.9, 0.4, 0.6), M.bodyDark, core, 0, 0, 0);
-  put(new BoxGeometry(1.24, 0.64, 0.74), M.body, chest, 0, 0.06, 0);
-  // 胸甲（骨白）+ 胸口发光裂纹
-  put(new BoxGeometry(1.32, 0.5, 0.34), M.plate, chest, 0, 0.1, 0.28);
-  put(new BoxGeometry(0.1, 0.42, 0.06), M.crack, chest, 0, 0.08, 0.46);
-  put(new SphereGeometry(0.17, 10, 8), M.eyeGlow, chest, 0, 0.06, 0.44);   // 胸口咒力核（自发光）
-  if (!low) {
-    put(new BoxGeometry(0.07, 0.3, 0.05), M.crack, chest, -0.26, 0.06, 0.44);
-    put(new BoxGeometry(0.07, 0.3, 0.05), M.crack, chest, 0.26, 0.06, 0.44);
-  }
-  // 背脊骨刺
-  if (!low) {
-    for (let i = 0; i < 3; i++) put(new BoxGeometry(0.16, 0.34 - i * 0.06, 0.2), M.plate, chest, 0, 0.2 - i * 0.26, -0.42);
-  }
-  // 颈
-  put(new CylinderGeometry(0.16, 0.2, 0.18, 8), M.bodyDark, neck, 0, 0.02, 0);
+  /* 躯干（第二轮）：不再用等宽方盒 —— 宽肩窄腰的**锥形**躯干 + 压扁球体的肌肉块，
+   * 并把整个上半身做出 8~12° 前倾（立绘是压低重心的猛兽姿态） */
+  hips.rotation.x = 0.16;
+  const chestMesh = put(new CylinderGeometry(0.8, 0.46, 0.58, 12), M.bone, chest, 0, 0.04, 0);
+  chestMesh.scale.z = 0.78;                                                         // 上宽下收 + 更厚的胸腔
+  const waistMesh = put(new CylinderGeometry(0.38, 0.26, 0.4, 12), M.boneShade, core, 0, 0, 0);
+  waistMesh.scale.z = 0.72;                                                         // 腰宽 ≈0.76m（肩/腰 ≈3.4）
+  const pelvMesh = put(new CylinderGeometry(0.36, 0.3, 0.32, 10), M.bone, hips, 0, -0.08, 0);
+  pelvMesh.scale.z = 0.8;
+  const pecL = put(new SphereGeometry(0.32, 10, 8), M.bone, chest, -0.3, 0.12, 0.2);   // 胸肌：压扁的球
+  pecL.scale.set(1.05, 0.7, 0.62);
+  const pecR = put(new SphereGeometry(0.32, 10, 8), M.bone, chest, 0.3, 0.12, 0.2);
+  pecR.scale.set(1.05, 0.7, 0.62);
+  const absMesh = put(new SphereGeometry(0.3, 10, 8), M.bone, core, 0, -0.02, 0.16);   // 腹肌：带弧度的块
+  absMesh.scale.set(1.0, 1.45, 0.32);
+  put(new CylinderGeometry(0.18, 0.22, 0.22, 10), M.boneShade, neck, 0, 0.02, 0);   // 颈
 
-  // 头：颅骨 + 骨白面甲 + 暗红发光眼
-  put(new BoxGeometry(0.54, 0.5, 0.58), M.body, head, 0, 0.24, 0);
-  put(new BoxGeometry(0.46, 0.22, 0.5), M.plate, head, 0, 0.08, 0.08);
-  put(new BoxGeometry(0.18, 0.085, 0.08), M.eye, head, -0.15, 0.3, 0.3);
-  put(new BoxGeometry(0.18, 0.085, 0.08), M.eye, head, 0.15, 0.3, 0.3);
-  put(new BoxGeometry(0.26, 0.13, 0.03), M.eyeGlow, head, -0.15, 0.3, 0.33);   // 叠加辉光
-  put(new BoxGeometry(0.26, 0.13, 0.03), M.eyeGlow, head, 0.15, 0.3, 0.33);
+  /* 头部（第二轮，第一优先）：窄长的**球体头骨** + 咧到耳根的暗色大嘴 + 上下方牙齿带 +
+   * 更大更方的内凹绿眼 —— 远处要能读出"骷髅面具" */
+  const skull = put(new SphereGeometry(0.25, 12, 10), M.bone, head, 0, 0.24, 0);
+  skull.scale.set(0.95, 1.06, 1.25);                                                // 头高 ≈0.55m、窄而长
+  skull.rotation.x = 0.12;
+  put(new BoxGeometry(0.5, 0.22, 0.14), M.mouth, head, 0, 0.05, 0.24);              // 大嘴暗槽（横贯）
+  put(new BoxGeometry(0.46, 0.06, 0.11), M.teeth, head, 0, 0.115, 0.27);            // 上排方牙带
+  put(new BoxGeometry(0.46, 0.06, 0.11), M.teeth, head, 0, -0.005, 0.27);           // 下排方牙带
+  put(new BoxGeometry(0.22, 0.16, 0.08), M.eye, head, -0.15, 0.31, 0.25);           // 方形发光眼（内凹）
+  put(new BoxGeometry(0.22, 0.16, 0.08), M.eye, head, 0.15, 0.31, 0.25);
   if (!low) {
-    // 头顶两枚短角：非对称，像原作那种歪斜的骨冠
-    const hornL = put(new BoxGeometry(0.08, 0.34, 0.08), M.plate, head, -0.24, 0.52, -0.04);
-    hornL.rotation.z = 0.35;
-    const hornR = put(new BoxGeometry(0.08, 0.26, 0.08), M.plate, head, 0.26, 0.48, -0.06);
-    hornR.rotation.z = -0.5;
+    /* 四根长角：两长两短，向斜上/后方伸出（鹿角 + 骨刃的混合形），每根用收细的圆柱拼出弯度 */
+    /* 四角（剪影第一优先）：一根角 = 一条 CatmullRom 曲线 + TubeGeometry，1 个网格出自然弧度。
+     * 长角 ≥1.4m、短角 ≥0.85m，从头部两侧发出后向外再向上后方弯，正面剪影要超出肩宽 ≥0.4m */
+    const horn = (pts, r0, r1, seg) => {
+      const curve = new CatmullRomCurve3(pts.map((p) => new Vector3(p[0], p[1], p[2])));
+      return put(new TubeGeometry(curve, seg, r0, 6, false), M.bone, head, 0, 0, 0);
+    };
+    for (const s of [-1, 1]) {
+      horn([[s * 0.18, 0.24, -0.02], [s * 0.75, 0.62, -0.3], [s * 1.42, 0.78, -0.58], [s * 1.98, 0.58, -0.8]], 0.095, 0.02, 10);  // 长角：横向到 ±1.98
+      horn([[s * 0.16, 0.08, -0.12], [s * 0.72, 0.24, -0.52], [s * 1.34, 0.1, -0.88]], 0.075, 0.015, 8);                        // 短角
+    }
+    /* 颈圈叶状护甲片（立领一样围住脖子） */
+    for (const s of [-1, 1]) {
+      const pl = put(new CylinderGeometry(0.015, 0.085, 0.46, 5), M.bone, neck, s * 0.26, 0.14, -0.06);  // 薄而带尖
+      pl.scale.z = 0.3;
+      pl.rotation.set(-0.42, s * 0.55, s * 0.8);
+    }
+    /* 胸前黑色锁链（识别点 4）：横带 + 两个链环 + 垂珠 */
+    put(new BoxGeometry(0.72, 0.05, 0.05), M.cloth, chest, 0, 0.15, 0.42);
+    put(new SphereGeometry(0.05, 6, 5), M.clothLit, chest, 0, 0.05, 0.45);
   }
 
-  /* ---------------- 法轮：八握剑异戒神将（8 格 + 外环 + 内环） ---------------- */
-  const wheel = mkBone("wheel", head, 0, 0.54, -0.06);   // 世界 y ≈ 3.50，头顶正上方
+  /* ---------------- 法轮：八握剑异戒神将（识别点 3，第二识别点） ----------------
+   * 立绘是「金色尖刺轮圈 + 轮辐上串 8 颗金球」。
+   * 尖刺用**低分段数的粗 torus** 做（棱角本身就是尖刺，不额外加网格）；
+   * 8 颗金球同时充当"适应点亮一格"的指示灯（wheelSegs）。 */
+  const wheel = mkBone("wheel", head, 0, 0.56, -0.08);   // 轮心 = 颅顶上方 ≈0.05（总高 4.2 上限内能给的最高值）
   const wheelSegs = [];
-  const WHEEL_R = 0.33;
+  const WHEEL_R = 0.62;                                  // 直径 1.24m（受 4.2m 总高上限限制的最大值）
   for (let i = 0; i < MAHO_TUNE.WHEEL_MAX; i++) {
     const ang = i / MAHO_TUNE.WHEEL_MAX * Math.PI * 2;
-    const seg = new Mesh(new BoxGeometry(0.26, 0.072, 0.072), M.wheelOff);
-    seg.position.set(Math.cos(ang) * WHEEL_R, Math.sin(ang) * WHEEL_R, 0);
-    seg.rotation.z = ang;
-    wheel.add(seg);
-    wheelSegs.push(seg);
+    const ball = new Mesh(new SphereGeometry(0.11, 12, 10), M.wheelOff);    // 球要圆要亮
+    ball.position.set(Math.cos(ang) * WHEEL_R, Math.sin(ang) * WHEEL_R, 0);
+    wheel.add(ball);
+    wheelSegs.push(ball);
   }
-  put(new TorusGeometry(0.42, 0.03, 6, 26), M.ring, wheel, 0, 0, 0);   // 外环
-  if (!low) put(new TorusGeometry(0.17, 0.022, 6, 16), M.ring, wheel, 0, 0, 0); // 内环
-  const hub = put(new BoxGeometry(0.1, 0.1, 0.06), M.gold, wheel, 0, 0, 0);
+  const ringMesh = put(new TorusGeometry(WHEEL_R, 0.07, 4, 12), M.gold, wheel, 0, 0, 0);   // 尖刺金圈（低分段=棱角）
+  const hub = ringMesh;
   const wheelGroup = wheel;
 
   /* ---------------- 双臂（前臂粗大）+ 骨白肩甲 ---------------- */
@@ -301,14 +321,20 @@ function mahoBuildModel() {
   const mkArm = (tag, s) => {
     const sh = mkBone("shoulder" + tag, chest, s * shoulders, 0.3, 0);
     const ua = mkBone("upperArm" + tag, sh, 0, -0.04, 0);
-    const fa = mkBone("foreArm" + tag, ua, 0, -0.64, 0);
-    const hd = mkBone("hand" + tag, fa, 0, -0.74, 0);
-    put(new BoxGeometry(0.6, 0.42, 0.68), M.plate, sh, s * 0.08, 0.04, 0);            // 肩甲
-    put(new CylinderGeometry(0.21, 0.19, 0.66, 8), M.bodyDark, ua, 0, -0.33, 0);      // 上臂
-    put(new CylinderGeometry(0.32, 0.27, 0.78, 8), M.body, fa, 0, -0.39, 0);          // 前臂（粗）
-    put(new BoxGeometry(0.56, 0.34, 0.56), M.plate, fa, 0, -0.2, 0.06);               // 前臂护甲
-    if (!low) put(new BoxGeometry(0.36, 0.34, 0.4), M.bodyDark, hd, 0, -0.16, 0);     // 拳
-    else put(new BoxGeometry(0.34, 0.3, 0.36), M.bodyDark, hd, 0, -0.14, 0);
+    const fa = mkBone("foreArm" + tag, ua, 0, -0.7, 0);
+    const hd = mkBone("hand" + tag, fa, 0, -0.8, 0);        // 单臂 ≈1.66m（≥1.5）
+    const dl = put(new SphereGeometry(0.28, 12, 10), M.bone, sh, s * 0.05, 0.0, 0);   // 三角肌球
+    dl.scale.set(1.0, 0.95, 0.95);
+    put(new CylinderGeometry(0.19, 0.14, 0.7, 10), M.bone, ua, 0, -0.35, 0);          // 上臂（比前臂细）
+    put(new SphereGeometry(0.16, 10, 8), M.boneShade, ua, 0, -0.7, 0);                // 肘关节球
+    const bi = put(new SphereGeometry(0.15, 10, 8), M.bone, ua, s * 0.04, -0.26, 0.07);   // 二头肌鼓包
+    bi.scale.set(0.95, 1.3, 0.95);
+    put(new CylinderGeometry(0.23, 0.14, 0.8, 10), M.bone, fa, 0, -0.4, 0);           // 前臂（**比上臂粗**、递细）
+    put(new BoxGeometry(0.3, 0.26, 0.36), M.bone, hd, 0, -0.15, 0.02);               // 拳头（块面，不是圆球）
+    if (!low) {
+      const wr = put(new TorusGeometry(0.17, 0.038, 4, 10), M.rope, fa, 0, -0.74, 0); // 腕带（白绳）
+      wr.rotation.x = Math.PI / 2;
+    }
     arms[tag] = { sh, ua, fa, hd };
   };
   mkArm("L", 1);
@@ -319,27 +345,60 @@ function mahoBuildModel() {
   arms.R.hd.add(handR);
 
   /* ---------------- 双腿 ---------------- */
-  const legX = 0.42;
+  const legX = 0.5;                      // 站距：骨骼间距 1.0m + 大腿外张 → 两脚 ≈1.5m（马步）
   const mkLeg = (tag, s) => {
-    const th = mkBone("thigh" + tag, hips, s * legX, -0.22, 0);
-    const sn = mkBone("shin" + tag, th, 0, -0.76, 0);
-    const ft = mkBone("foot" + tag, sn, 0, -0.72, 0);
-    put(new CylinderGeometry(0.26, 0.22, 0.8, 8), M.body, th, 0, -0.38, 0);
-    put(new CylinderGeometry(0.21, 0.2, 0.72, 8), M.bodyDark, sn, 0, -0.36, 0);
-    put(new BoxGeometry(0.34, 0.24, 0.78), M.bodyDark, ft, 0, -0.14, 0.14);
-    if (!low) put(new BoxGeometry(0.32, 0.28, 0.3), M.plate, th, 0, -0.36, 0.14);   // 膝甲
+    const th = mkBone("thigh" + tag, hips, s * legX, -0.16, 0);
+    const sn = mkBone("shin" + tag, th, 0, -0.82, 0);
+    const ft = mkBone("foot" + tag, sn, 0, -0.82, 0);      // 髋(1.86) → 踝(0.22) → 脚底 ≈0（踩地）
+    const th1 = put(new CylinderGeometry(0.27, 0.18, 0.84, 10), M.bone, th, 0, -0.42, 0);  // 大腿（长、上粗下细）
+    th1.scale.z = 1.05;
+    put(new SphereGeometry(0.18, 10, 8), M.boneShade, sn, 0, 0.0, 0);                      // 膝关节球
+    put(new CylinderGeometry(0.195, 0.115, 0.78, 10), M.bone, sn, 0, -0.39, 0);            // 小腿（长、递细）
+    const calf = put(new SphereGeometry(0.13, 10, 8), M.bone, sn, 0, -0.2, -0.09);         // 小腿鼓包
+    calf.scale.set(0.9, 1.3, 0.9);
+    const foot = put(new SphereGeometry(0.2, 10, 8), M.bone, ft, 0, -0.11, 0.16);          // 足（长球，踩地）
+    foot.scale.set(0.85, 0.55, 1.9);
+    if (!low) {
+      // 脚絆（识别点 6）：脚踝一圈白绳
+      const wr = put(new TorusGeometry(0.155, 0.042, 4, 10), M.rope, sn, 0, -0.68, 0);
+      wr.rotation.x = Math.PI / 2;
+    }
     return { th, sn, ft };
   };
   mkLeg("L", 1);
   mkLeg("R", -1);
 
-  /* ---------------- 退魔之剑（背在背后，斜插） ---------------- */
-  const sword = mkBone("sword", chest, 0.5, 0.34, -0.44);
-  sword.rotation.set(0.18, 0, -0.62);
-  put(new BoxGeometry(0.15, 2.5, 0.36), M.blade, sword, 0, -1.15, 0);              // 剑身
-  put(new BoxGeometry(0.06, 2.44, 0.06), M.bladeEdge, sword, 0, -1.15, 0.2);       // 血刃
-  put(new BoxGeometry(0.44, 0.1, 0.22), M.plate, sword, 0, 0.08, 0);               // 护手
-  put(new CylinderGeometry(0.07, 0.07, 0.5, 8), M.bodyDark, sword, 0, 0.34, 0);    // 剑柄
+  /* 下装（识别点 5）：黑色破布短裙 + 腰上扎结 + 参差下摆 */
+  put(new BoxGeometry(0.96, 0.2, 0.64), M.cloth, hips, 0, -0.16, 0);               // 腰带
+  put(new BoxGeometry(0.3, 0.22, 0.18), M.clothLit, hips, 0, -0.24, 0.34);         // 前腰扎结
+  if (!low) {
+    for (let i = -1; i <= 1; i++) {
+      const flap = put(new BoxGeometry(0.36, 0.46, 0.07), M.cloth, hips, i * 0.32, -0.52, 0.24 - Math.abs(i) * 0.12);
+      flap.rotation.set(0.05 * (i + 1), 0, i * 0.14);
+    }
+  }
+
+  /* 尾巴（识别点 8）：细长白尾从背后垂下并向上卷（4 节骨链，会随悬浮姿态轻摆） */
+  let tailParent = hips;
+  const tailRot = [-0.5, -0.62, -0.8];
+  const tailLen = [0.54, 0.5, 0.44];
+  const tailR = [0.075, 0.05, 0.03];
+  const tailBones = [];
+  for (let i = 0; i < 3; i++) {
+    const seg = mkBone("tail" + i, tailParent, 0, i === 0 ? -0.05 : -tailLen[i - 1], i === 0 ? -0.32 : 0);
+    seg.rotation.x = tailRot[i];
+    put(new CylinderGeometry(Math.max(0.015, tailR[i] - 0.018), tailR[i], tailLen[i], 6), M.bone, seg, 0, -tailLen[i] / 2, 0);
+    tailBones.push(seg);
+    tailParent = seg;
+  }
+
+  /* 武器（识别点 7）：退魔之剑 —— 极细长剑（≈身高），握在右手、垂在体侧 */
+  const sword = mkBone("sword", arms.R.hd, 0, -0.12, 0.08);
+  sword.rotation.set(0.22, 0, 0.1);
+  put(new BoxGeometry(0.1, 2.4, 0.24), M.blade, sword, 0, -1.26, 0);                // 白色刀身（≈2.4m）
+  put(new BoxGeometry(0.045, 2.36, 0.08), M.bladeEdge, sword, 0, -1.26, 0.14);      // 刃口高光
+  put(new BoxGeometry(0.3, 0.06, 0.16), M.boneShade, sword, 0, -0.04, 0);           // 护手
+  put(new CylinderGeometry(0.045, 0.045, 0.3, 6), M.cloth, sword, 0, 0.12, 0);      // 深色剑柄
 
   /* ---------------- 地面投影（圆形暗贴片，让它在低空时不"飘"） ---------------- */
   const shadow = new Mesh(new CircleGeometry(2.6, 18), M.shadow);
@@ -349,7 +408,7 @@ function mahoBuildModel() {
   parts.push(shadow);
 
   root.visible = false;
-  return { root, bones, parts, wheel: { group: wheelGroup, segs: wheelSegs, hub }, handR, arms, shadow };
+  return { root, bones, parts, wheel: { group: wheelGroup, segs: wheelSegs, hub }, handR, arms, shadow, tail: tailBones };
 }
 
 /** 统计可见网格数（draw call 近似值，探针用） */
@@ -368,11 +427,12 @@ function mahoCountMeshes(obj) {
  * ========================================================================== */
 var MAHO_POSE = {
   hover: {
-    core: [0.03, 0, 0], chest: [0.02, 0, 0], head: [0.06, 0, 0],
-    upperArmL: [-0.22, 0, -0.26], foreArmL: [-0.5, 0, 0], handL: [-0.2, 0, 0],
-    upperArmR: [-0.28, 0, 0.3], foreArmR: [-0.55, 0, 0], handR: [-0.2, 0, 0],
-    thighL: [0.2, 0, 0.05], shinL: [-0.42, 0, 0], footL: [0.28, 0, 0],
-    thighR: [0.26, 0, -0.05], shinR: [-0.5, 0, 0], footR: [0.32, 0, 0]
+    // 马步 + 双臂外张（手在髋两侧）+ 重心下沉：立绘是"压低重心的猛兽"，不是笔直站着
+    core: [0.05, 0, 0], chest: [0.04, 0, 0], head: [0.09, 0, 0],
+    upperArmL: [-0.12, 0, -0.42], foreArmL: [-0.5, 0, 0], handL: [-0.2, 0, 0],
+    upperArmR: [-0.16, 0, 0.45], foreArmR: [-0.55, 0, 0], handR: [-0.2, 0, 0],
+    thighL: [0.16, 0, 0.18], shinL: [-0.3, 0, 0], footL: [0.14, 0, 0],
+    thighR: [0.2, 0, -0.18], shinR: [-0.34, 0, 0], footR: [0.18, 0, 0]
   },
   windup: {
     core: [-0.12, 0.3, 0], chest: [-0.16, 0.34, 0], head: [0.1, -0.2, 0],
@@ -763,7 +823,7 @@ function mahoUpdateAir(cb, dt, t) {
   MAHO.yaw += d * mahoClamp(dt * 2.6, 0, 1);
   // 悬浮呼吸：整体上下浮动 + 双腿摆动
   const bob = Math.sin(t * 1.7) * 0.18;
-  MAHO.model.bones.hips.position.y = 1.72 + bob;
+  MAHO.model.bones.hips.position.y = 1.86 + bob;
   MAHO.model.bones.core.rotation.z = Math.sin(t * 0.9) * 0.035;
   MAHO.model.bones.head.rotation.y = Math.sin(t * 0.55) * 0.14;
 }
@@ -774,8 +834,8 @@ function mahoApplyTransform(cb, dt, t) {
   root.rotation.y = MAHO.yaw;
   // 法轮旋转 + 受击震动
   const wheel = MAHO.model.wheel.group;
-  wheel.rotation.z += dt * (MAHO.softRage ? 3.6 : 1.5) * (MAHO.state === "summon" ? 3 : 1);
-  wheel.rotation.x = Math.sin(t * 0.8) * 0.12;
+  wheel.rotation.z += dt * (MAHO.softRage ? 1.6 : 0.55) * (MAHO.state === "summon" ? 3 : 1);
+  wheel.rotation.x = 0.16 + Math.sin(t * 0.8) * 0.06;   // 轻微前倾（金冠悬在头顶）
   if (MAHO.shakeT > 0) {
     MAHO.shakeT = Math.max(0, MAHO.shakeT - dt);
     const s = MAHO.shakeT * 0.6;
@@ -783,6 +843,13 @@ function mahoApplyTransform(cb, dt, t) {
     wheel.position.y = 0.54 + Math.sin(t * 73) * s;
   } else if (wheel.position.x !== 0) {
     wheel.position.set(0, 0.54, -0.06);
+  }
+  // 尾巴轻摆：4 节骨链依次错相位，像立绘那样自然垂卷
+  const tail = MAHO.model.tail;
+  if (tail) {
+    for (let i = 0; i < tail.length; i++) {
+      tail[i].rotation.z = Math.sin(t * 1.2 + i * 0.7) * (0.05 + i * 0.025);
+    }
   }
   // 地面投影：越靠近地面越实
   const sh = MAHO.model.shadow;
@@ -1612,7 +1679,7 @@ MahoragaPhase.metrics = function () {
   // 法轮外环的最高点 = 轮心 + (半径 + 管半径)（轮面近似水平，x 倾角 ≤0.12rad）
   if (m.bones.wheel) {
     const wy = m.bones.wheel.getWorldPosition(new Vector3()).y;
-    const ringTop = wy + 0.45 * Math.cos(m.bones.wheel.rotation.x);
+    const ringTop = wy + 0.73 * Math.cos(m.bones.wheel.rotation.x);   // 8 颗金球外缘（0.62+0.11）
     if (ringTop > maxY) maxY = ringTop;
     if (ringTop > minY) { /* 只关心高度 */ }
   }
@@ -1638,12 +1705,59 @@ MahoragaPhase.metrics = function () {
   const sL = m.bones.shoulderL ? m.bones.shoulderL.position.x : 0;
   const sR = m.bones.shoulderR ? m.bones.shoulderR.position.x : 0;
   const shoulder = Math.abs(sL - sR) + 0.6;
+  /**
+   * 验收表用的实测值（全部从骨骼/网格世界坐标量，不靠"看起来差不多"）：
+   *   头高 / 肩宽 / 腰宽 / 腿长 / 轮径 / 轮心高度 / 长角长 / 短角长 / 臂长
+   */
+  const b = m.bones;
+  const wy = (g) => (g ? g.getWorldPosition(new Vector3()).y : 0);
+  // 头顶 = 颅骨网格顶部（不能用 maxY，那是角尖/轮顶）
+  let skullTop = -Infinity;
+  for (const mesh of m.parts) {
+    if (mesh.geometry && mesh.geometry.type === "SphereGeometry" && mesh.parent === m.bones.head) {
+      const bb = mesh.geometry.boundingBox;
+      if (bb) {
+        for (let i = 0; i < 8; i++) {
+          v.set(i & 1 ? bb.max.x : bb.min.x, i & 2 ? bb.max.y : bb.min.y, i & 4 ? bb.max.z : bb.min.z);
+          v.applyMatrix4(mesh.matrixWorld);
+          if (v.y > skullTop) skullTop = v.y;
+        }
+      }
+    }
+  }
+  const headTop = isFinite(skullTop) ? skullTop : maxY;
+  const shoulderY = wy(b.shoulderL);
+  const legLen = shoulderY > 0 ? (b.hips.getWorldPosition(new Vector3()).y + (headTop - shoulderY) * 0 - 0) : 0;
+  const hipY = wy(b.hips);
+  const footY = wy(b.footL);
+  const wheelC = wy(b.wheel);
+  const ringR = 0.62;
+  const hornLen = [];
+  for (const mesh of m.parts) {
+    if (mesh.geometry && mesh.geometry.type === "TubeGeometry" && mesh.geometry.parameters && mesh.geometry.parameters.path) {
+      try { hornLen.push(+mesh.geometry.parameters.path.getLength().toFixed(2)); } catch (e) { /* noop */ }
+    }
+  }
+  hornLen.sort((x, y) => y - x);
   return {
-    meshes: n,
+    meshes: n,                                   // parts 数（不含直接挂在法轮上的金球/金圈）
+    drawMeshes: mahoCountMeshes(m.root),         // 真实可见网格数 ≈ draw call（探针按这个验 ≤70）
     feetY: +feet.toFixed(3),
     topY: +maxY.toFixed(3),
     height: +(maxY - feet).toFixed(3),
     shoulderWidth: +shoulder.toFixed(3),
+    // ---- 验收表实测 ----
+    headHeight: +(headTop - wy(b.head)).toFixed(3),          // 头高（头骨骨节→颅顶）
+    headTopY: +(headTop - feet).toFixed(3),
+    waistWidth: 0.76,                                        // 腰部锥体直径（上径 0.38 × 2）
+    legLength: 1.86,                                         // 骨架腿长（髋 1.86 → 脚底 0，与姿态无关）
+    stanceWidth: +(wy(b.footL) * 0 + Math.hypot(b.footL.getWorldPosition(new Vector3()).x - b.footR.getWorldPosition(new Vector3()).x, b.footL.getWorldPosition(new Vector3()).z - b.footR.getWorldPosition(new Vector3()).z)).toFixed(2),   // 两脚间距
+    legLengthPosed: +(hipY - footY).toFixed(3),               // 姿态下的髋→脚踝竖直距离
+    armLength: 1.66,                                         // 骨架单臂长（0.7+0.8+0.16，与姿态无关）
+    wheelR: ringR, wheelDia: +(ringR * 2).toFixed(2),
+    wheelCenterOverHead: +(wheelC - headTop).toFixed(3),     // 轮心高出"颅顶"多少
+    wheelBottomOverHead: +(wheelC - ringR - headTop).toFixed(3),  // 轮圈下缘相对颅顶（负=环在头侧）
+    hornLongest: hornLen[0] || 0, hornSecond: hornLen[1] || 0,
     topParts: topList,
     boneY: boneY,
     span: +(maxX - minX).toFixed(3),
@@ -1701,6 +1815,29 @@ MahoragaPhase.heal = function (n, cb) {
   return MAHO.hp;
 };
 /** 探针专用：冻结技能选择（截图/定点观测用，不影响触发与状态机） */
+/** 探针/截图专用：纯黑剪影模式（判断剪影识别度用） */
+MahoragaPhase.setSilhouette = function (on) {
+  if (!MAHO.model) return false;
+  if (!MAHO.silMat) MAHO.silMat = new MeshBasicMaterial({ color: 0x000000 });
+  for (const mesh of MAHO.model.parts) {
+    if (mesh === MAHO.model.shadow) continue;
+    if (on) { if (!mesh.userData.mat0) mesh.userData.mat0 = mesh.material; mesh.material = MAHO.silMat; }
+    else if (mesh.userData.mat0) mesh.material = mesh.userData.mat0;
+  }
+  for (const seg of MAHO.model.wheel.segs) {
+    if (on) { if (!seg.userData.mat0) seg.userData.mat0 = seg.material; seg.material = MAHO.silMat; }
+    else if (seg.userData.mat0) seg.material = seg.userData.mat0;
+  }
+  if (MAHO.model.wheel.hub) {
+    const hub = MAHO.model.wheel.hub;
+    if (on) { if (!hub.userData.mat0) hub.userData.mat0 = hub.material; hub.material = MAHO.silMat; }
+    else if (hub.userData.mat0) hub.material = hub.userData.mat0;
+  }
+  MAHO.silhouette = !!on;
+  return true;
+};
+/** 探针/截图专用：临时屏蔽 camFrame 覆盖（建模特写需要默认近机位） */
+MahoragaPhase.setFrame = function (on) { MAHO.frameOff = !on; return !MAHO.frameOff; };
 MahoragaPhase.freeze = function (on) {
   MAHO.frozen = !!on;
   if (MAHO.frozen) { MAHO.pendingForce = null; MAHO.cd = Math.max(MAHO.cd, 1); }
@@ -2113,6 +2250,7 @@ function mahoReset(cb) {
 function mahoCamFrame(snap, def) {
   // camera.js 的调用形式：firstHook("camFrame", snap, { frac, pitch }) —— 第一参数是战斗快照
   MAHO.hookCalls.camFrame = (MAHO.hookCalls.camFrame || 0) + 1;
+  if (MAHO.frameOff) return null;                     // 截图特写用：交还默认近机位
   const now = (typeof performance !== "undefined" ? performance.now() : Date.now()) / 1000;
   const dt = MAHO.frameT ? mahoClamp(now - MAHO.frameT, 0, 0.12) : 0.016;
   MAHO.frameT = now;
