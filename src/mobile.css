@@ -67,6 +67,20 @@ html.is-touch .ab { -webkit-tap-highlight-color: transparent; }
 
 /* 触屏设备隐藏鼠标专属的界面：滚轮音量条由右下角 ♪ 按钮接管 */
 html.is-touch .audio-panel { display: none !important; }
+/*
+  ⚠ 触屏上 .audio-dock 的 ♪ 也必须能打开面板。
+  上面那条 !important 原本把面板在触屏上彻底关死，只有触屏工具键的 .t-sheet 能展开；
+  Lead 把 .audio-dock 从 #hud 里挪出来之后，手机上一眼就能看到这个 ♪，
+  点下去却毫无反应 —— 这就是「手机上切歌没反应/听不到」的直接原因。
+  打开后朝下弹出（dock 在 46% 高度，朝上会被屏幕顶边裁掉），滑杆也放大到能用手指拖。
+  这条放在 .audio-panel.t-sheet 之前：两个入口都能用，且 .t-sheet 的定位优先级更高。 */
+html.is-touch .audio-dock.open .audio-panel {
+  display: flex !important;
+  top: 42px; bottom: auto;
+}
+html.is-touch .audio-panel label { font-size: 12px; letter-spacing: .18em; }
+html.is-touch .audio-panel input { width: 132px; height: 22px; }
+html.is-touch .audio-dock .audio-toggle { width: 40px; height: 40px; font-size: 17px; }
 
 /* 触屏层专用的显隐开关（styles.css 里只有 .hidden，本模块用自己的 .t-hidden） */
 html.is-touch .t-hidden { display: none !important; }

@@ -967,6 +967,20 @@ html.is-touch .ab { -webkit-tap-highlight-color: transparent; }
 
 /* 触屏设备隐藏鼠标专属的界面：滚轮音量条由右下角 ♪ 按钮接管 */
 html.is-touch .audio-panel { display: none !important; }
+/*
+  ⚠ 触屏上 .audio-dock 的 ♪ 也必须能打开面板。
+  上面那条 !important 原本把面板在触屏上彻底关死，只有触屏工具键的 .t-sheet 能展开；
+  Lead 把 .audio-dock 从 #hud 里挪出来之后，手机上一眼就能看到这个 ♪，
+  点下去却毫无反应 —— 这就是「手机上切歌没反应/听不到」的直接原因。
+  打开后朝下弹出（dock 在 46% 高度，朝上会被屏幕顶边裁掉），滑杆也放大到能用手指拖。
+  这条放在 .audio-panel.t-sheet 之前：两个入口都能用，且 .t-sheet 的定位优先级更高。 */
+html.is-touch .audio-dock.open .audio-panel {
+  display: flex !important;
+  top: 42px; bottom: auto;
+}
+html.is-touch .audio-panel label { font-size: 12px; letter-spacing: .18em; }
+html.is-touch .audio-panel input { width: 132px; height: 22px; }
+html.is-touch .audio-dock .audio-toggle { width: 40px; height: 40px; font-size: 17px; }
 
 /* 触屏层专用的显隐开关（styles.css 里只有 .hidden，本模块用自己的 .t-hidden） */
 html.is-touch .t-hidden { display: none !important; }
@@ -1737,9 +1751,12 @@ html.is-touch .controls-grid { display: none !important; }
   <div class="audio-dock">
     <button id="audio-toggle" class="audio-toggle" type="button" aria-label="音量设置">♪</button>
     <div class="audio-panel" data-page-node-id="XJ2Em1gcDY39YJOOaW7ggK">
-    <label data-page-node-id="ctxZrJKn3618DpbHBKAxB6">音<i id="vol-master-label" data-page-node-id="z11my6pZlLqBXi5bOpuCBn">70</i><input id="vol-master" type="range" min="0" max="100" value="70" data-page-node-id="tuCwnDrd07v2xdkgP0fbzU"></label>
-    <label data-page-node-id="QuX1St52vMiJ1kfIEK56DY">乐<i id="vol-music-label" data-page-node-id="uBa3n9V8Cf5mepV2BqD4X3">55</i><input id="vol-music" type="range" min="0" max="100" value="55" data-page-node-id="Kb9jKlYZYbdMS0Zn93pFFc"></label>
+      <label data-page-node-id="ctxZrJKn3618DpbHBKAxB6">音<i id="vol-master-label" data-page-node-id="z11my6pZlLqBXi5bOpuCBn">70</i><input id="vol-master" type="range" min="0" max="100" value="70" data-page-node-id="tuCwnDrd07v2xdkgP0fbzU"></label>
+      <label data-page-node-id="QuX1St52vMiJ1kfIEK56DY">乐<i id="vol-music-label" data-page-node-id="uBa3n9V8Cf5mepV2BqD4X3">55</i><input id="vol-music" type="range" min="0" max="100" value="55" data-page-node-id="Kb9jKlYZYbdMS0Zn93pFFc"></label>
       <div class="bgm-pick hidden" id="bgm-pick" role="group" aria-label="背景音乐"></div>
+      <label data-page-node-id="YHrmb7NZ2vU0HePzPtBHbi">效<i id="vol-sfx-label" data-page-node-id="K2yHlEpnFAjZmZYtu0cXLA">85</i><input id="vol-sfx" type="range" min="0" max="100" value="85" data-page-node-id="Vi0WTRMjnEU63S5AOQPcuD"></label>
+    </div>
+  </div>
 
 <script>
 (() => {
@@ -47406,6 +47423,29 @@ void main(){
       stats.droppedPlays++;
     }
   }
+  /**
+   * 外部 BGM 抑制开关。
+   *
+   * 本作自己有一套**程序化生成**的配乐（music_intro / music_battle / music_domain / music_final，
+   * 见 MUSIC 表），而画面上还有一个 <audio> 元素在播玩家选的那首歌。
+   * 两套一起响，玩家听到的就是「两首歌重叠」—— 实测战斗中 music_battle(140BPM) 与
+   * <audio> 的 BGM 同时在放。
+   *
+   * 玩家既然能选歌，程序化配乐就必须让位：开关打开时立刻停掉所有 music_* 声部，
+   * 并且后续的 loop("music_*") 全部忽略。**只影响配乐，音效（SFX）完全不受影响。**
+   */
+  var musicSuppressed = false;
+  var activeMusic = {};
+  function setMusicSuppressed(on) {
+    const next = !!on;
+    if (next === musicSuppressed) return;
+    musicSuppressed = next;
+    if (next) {
+      for (const k in MUSIC) {
+        if (activeMusic[k]) { stopTrack(k, 0.35); delete activeMusic[k]; }
+      }
+    }
+  }
   function loop(name, opts) {
     if (!ready) {
       stats.droppedPlays++;
@@ -47413,6 +47453,8 @@ void main(){
     }
     if (typeof name !== "string" || !name) return;
     if (MUSIC[name]) {
+      if (musicSuppressed) return;   // 玩家选了外部 BGM → 程序化配乐不参与
+      activeMusic[name] = true;
       startTrack(name, opts?.fadeIn ?? 0.4);
       return;
     }
@@ -47436,6 +47478,7 @@ void main(){
   function stop(name) {
     if (!ready) return;
     if (MUSIC[name]) {
+      delete activeMusic[name];
       stopTrack(name, 0.45);
       return;
     }
@@ -47535,6 +47578,9 @@ void main(){
       unlock,
       play,
       loop,
+    setMusicSuppressed,
+    /** 诊断口：当前有没有程序化配乐在放（排查"两首歌重叠"用） */
+    get musicState() { return { suppressed: musicSuppressed, active: Object.keys(activeMusic) }; },
       stop,
       setMaster,
       setSfx,
@@ -56437,9 +56483,20 @@ void main() {
     startBGM();
     renderBgmPicker();
   }
+  /**
+   * 外部 BGM 真在响的时候，把游戏自带的程序化配乐关掉。
+   * 不这么做的话，<audio> 播着玩家选的歌、audio.js 的 music_battle/music_intro 也在放，
+   * 玩家听到的就是「两首歌重叠」。音量拉到 0 时再把配乐放回来，免得整局没声音。
+   */
+  function syncMusicSuppression() {
+    if (!audio || typeof audio.setMusicSuppressed !== "function") return;
+    const el = bgm();
+    audio.setMusicSuppressed(!!(el && !el.paused && el.volume > 0.001));
+  }
   function setBgmVolume(v) {
     const el = bgm();
     if (el) el.volume = Math.max(0, Math.min(1, v));
+    syncMusicSuppression();
   }
   /**
    * 启动 BGM（唯一的权威入口，单文件版与站点版都走这里）。
@@ -56470,6 +56527,7 @@ void main() {
     if (p && typeof p.then === "function") {
       p.then(() => {
         bgmPlaying = true;
+        syncMusicSuppression();
       }).catch((e) => {
         // 保持 bgmPlaying=false → 下一次任意手势会再试一次
         console.info("[新宿决战] BGM 首播未成功，将在下次交互重试:", e && e.name);
@@ -56477,6 +56535,7 @@ void main() {
     } else if (!el.paused) {
       // 老浏览器同步返回 play()：必须核对实际播放状态，不能凭空认为成功
       bgmPlaying = true;
+      syncMusicSuppression();
     }
   }
   // 四种手势都监听：移动端不同浏览器派发的事件不一样，少一个就有一批用户没声音

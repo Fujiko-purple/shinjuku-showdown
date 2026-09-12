@@ -45662,6 +45662,29 @@ void main(){
       stats.droppedPlays++;
     }
   }
+  /**
+   * 外部 BGM 抑制开关。
+   *
+   * 本作自己有一套**程序化生成**的配乐（music_intro / music_battle / music_domain / music_final，
+   * 见 MUSIC 表），而画面上还有一个 <audio> 元素在播玩家选的那首歌。
+   * 两套一起响，玩家听到的就是「两首歌重叠」—— 实测战斗中 music_battle(140BPM) 与
+   * <audio> 的 BGM 同时在放。
+   *
+   * 玩家既然能选歌，程序化配乐就必须让位：开关打开时立刻停掉所有 music_* 声部，
+   * 并且后续的 loop("music_*") 全部忽略。**只影响配乐，音效（SFX）完全不受影响。**
+   */
+  var musicSuppressed = false;
+  var activeMusic = {};
+  function setMusicSuppressed(on) {
+    const next = !!on;
+    if (next === musicSuppressed) return;
+    musicSuppressed = next;
+    if (next) {
+      for (const k in MUSIC) {
+        if (activeMusic[k]) { stopTrack(k, 0.35); delete activeMusic[k]; }
+      }
+    }
+  }
   function loop(name, opts) {
     if (!ready) {
       stats.droppedPlays++;
@@ -45669,6 +45692,8 @@ void main(){
     }
     if (typeof name !== "string" || !name) return;
     if (MUSIC[name]) {
+      if (musicSuppressed) return;   // 玩家选了外部 BGM → 程序化配乐不参与
+      activeMusic[name] = true;
       startTrack(name, opts?.fadeIn ?? 0.4);
       return;
     }
@@ -45692,6 +45717,7 @@ void main(){
   function stop(name) {
     if (!ready) return;
     if (MUSIC[name]) {
+      delete activeMusic[name];
       stopTrack(name, 0.45);
       return;
     }
@@ -45791,6 +45817,9 @@ void main(){
       unlock,
       play,
       loop,
+    setMusicSuppressed,
+    /** 诊断口：当前有没有程序化配乐在放（排查"两首歌重叠"用） */
+    get musicState() { return { suppressed: musicSuppressed, active: Object.keys(activeMusic) }; },
       stop,
       setMaster,
       setSfx,
@@ -54693,9 +54722,20 @@ void main() {
     startBGM();
     renderBgmPicker();
   }
+  /**
+   * 外部 BGM 真在响的时候，把游戏自带的程序化配乐关掉。
+   * 不这么做的话，<audio> 播着玩家选的歌、audio.js 的 music_battle/music_intro 也在放，
+   * 玩家听到的就是「两首歌重叠」。音量拉到 0 时再把配乐放回来，免得整局没声音。
+   */
+  function syncMusicSuppression() {
+    if (!audio || typeof audio.setMusicSuppressed !== "function") return;
+    const el = bgm();
+    audio.setMusicSuppressed(!!(el && !el.paused && el.volume > 0.001));
+  }
   function setBgmVolume(v) {
     const el = bgm();
     if (el) el.volume = Math.max(0, Math.min(1, v));
+    syncMusicSuppression();
   }
   /**
    * 启动 BGM（唯一的权威入口，单文件版与站点版都走这里）。
@@ -54726,6 +54766,7 @@ void main() {
     if (p && typeof p.then === "function") {
       p.then(() => {
         bgmPlaying = true;
+        syncMusicSuppression();
       }).catch((e) => {
         // 保持 bgmPlaying=false → 下一次任意手势会再试一次
         console.info("[新宿决战] BGM 首播未成功，将在下次交互重试:", e && e.name);
@@ -54733,6 +54774,7 @@ void main() {
     } else if (!el.paused) {
       // 老浏览器同步返回 play()：必须核对实际播放状态，不能凭空认为成功
       bgmPlaying = true;
+      syncMusicSuppression();
     }
   }
   // 四种手势都监听：移动端不同浏览器派发的事件不一样，少一个就有一批用户没声音

@@ -233,9 +233,20 @@
     startBGM();
     renderBgmPicker();
   }
+  /**
+   * 外部 BGM 真在响的时候，把游戏自带的程序化配乐关掉。
+   * 不这么做的话，<audio> 播着玩家选的歌、audio.js 的 music_battle/music_intro 也在放，
+   * 玩家听到的就是「两首歌重叠」。音量拉到 0 时再把配乐放回来，免得整局没声音。
+   */
+  function syncMusicSuppression() {
+    if (!audio || typeof audio.setMusicSuppressed !== "function") return;
+    const el = bgm();
+    audio.setMusicSuppressed(!!(el && !el.paused && el.volume > 0.001));
+  }
   function setBgmVolume(v) {
     const el = bgm();
     if (el) el.volume = Math.max(0, Math.min(1, v));
+    syncMusicSuppression();
   }
   /**
    * 启动 BGM（唯一的权威入口，单文件版与站点版都走这里）。
@@ -266,6 +277,7 @@
     if (p && typeof p.then === "function") {
       p.then(() => {
         bgmPlaying = true;
+        syncMusicSuppression();
       }).catch((e) => {
         // 保持 bgmPlaying=false → 下一次任意手势会再试一次
         console.info("[新宿决战] BGM 首播未成功，将在下次交互重试:", e && e.name);
@@ -273,6 +285,7 @@
     } else if (!el.paused) {
       // 老浏览器同步返回 play()：必须核对实际播放状态，不能凭空认为成功
       bgmPlaying = true;
+      syncMusicSuppression();
     }
   }
   // 四种手势都监听：移动端不同浏览器派发的事件不一样，少一个就有一批用户没声音

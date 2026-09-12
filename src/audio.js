@@ -2216,6 +2216,29 @@
       stats.droppedPlays++;
     }
   }
+  /**
+   * 外部 BGM 抑制开关。
+   *
+   * 本作自己有一套**程序化生成**的配乐（music_intro / music_battle / music_domain / music_final，
+   * 见 MUSIC 表），而画面上还有一个 <audio> 元素在播玩家选的那首歌。
+   * 两套一起响，玩家听到的就是「两首歌重叠」—— 实测战斗中 music_battle(140BPM) 与
+   * <audio> 的 BGM 同时在放。
+   *
+   * 玩家既然能选歌，程序化配乐就必须让位：开关打开时立刻停掉所有 music_* 声部，
+   * 并且后续的 loop("music_*") 全部忽略。**只影响配乐，音效（SFX）完全不受影响。**
+   */
+  var musicSuppressed = false;
+  var activeMusic = {};
+  function setMusicSuppressed(on) {
+    const next = !!on;
+    if (next === musicSuppressed) return;
+    musicSuppressed = next;
+    if (next) {
+      for (const k in MUSIC) {
+        if (activeMusic[k]) { stopTrack(k, 0.35); delete activeMusic[k]; }
+      }
+    }
+  }
   function loop(name, opts) {
     if (!ready) {
       stats.droppedPlays++;
@@ -2223,6 +2246,8 @@
     }
     if (typeof name !== "string" || !name) return;
     if (MUSIC[name]) {
+      if (musicSuppressed) return;   // 玩家选了外部 BGM → 程序化配乐不参与
+      activeMusic[name] = true;
       startTrack(name, opts?.fadeIn ?? 0.4);
       return;
     }
@@ -2246,6 +2271,7 @@
   function stop(name) {
     if (!ready) return;
     if (MUSIC[name]) {
+      delete activeMusic[name];
       stopTrack(name, 0.45);
       return;
     }
@@ -2345,6 +2371,9 @@
       unlock,
       play,
       loop,
+    setMusicSuppressed,
+    /** 诊断口：当前有没有程序化配乐在放（排查"两首歌重叠"用） */
+    get musicState() { return { suppressed: musicSuppressed, active: Object.keys(activeMusic) }; },
       stop,
       setMaster,
       setSfx,
