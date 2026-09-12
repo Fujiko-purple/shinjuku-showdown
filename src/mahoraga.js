@@ -27,7 +27,8 @@
  *   BREAK_LOCK      1.8s  击破演出时长
  *   HP              900   魔虚罗血池
  *   HEIGHT/SHOULDER 4.2m / 2.6m（含法轮，契约 3.8~4.2）
- *   AIR_Y           14.2/15.2/16.2（easy/normal/hard，契约 14~17）
+ *   AIR_Y           5.2/5.8/6.4（easy/normal/hard；契约修订版 §4：可见的"半空"）
+ *   DESCEND_FROM    18m 召唤时从天而降的起点（看得见它落在哪）
  *   ORBIT_R         12/13.5/15      环绕玩家半径
  *   AIR_SPEED       8/10/12 m/s     水平机动上限（契约 8~12）
  *   HIT_R           2.4/2.0/1.7     命中球半径（契约 2.4/2.0/1.7）
@@ -45,6 +46,10 @@
  *   CD_HIGH/CD_LOW  4.0 / 2.6s（宿傩 HP 越低越短，契约）
  *   CD_DIFF         1.25/1.0/0.85（难度对冷却的整体缩放）
  *   DAMAGE_CD       0.75s  苍这类持续场两次「适应计数」之间的节流
+ *   BLOCK_P         0.30  悬浮态近战扫到本体时的偶发「挡下」概率（Lead 裁定批准的数值）
+ *   BLOCK_TRANSFER  0.35  挡下时把伤害转记到魔虚罗血条上的比例（绝不凭空消失）
+ *   AIR_Y           4.0/4.5/5.0（easy/normal/hard；Lead 裁定批准：实测 5.82m 时法轮顶会被切）
+ *   ORBIT_LOCAL     4/4.5/5m 绕**宿傩**的侧向航线半径（可见性的结构性保证）
  * ============================================================================
  */
 var MAHO_TUNE = {
@@ -54,11 +59,48 @@ var MAHO_TUNE = {
   HP: 900,
   HEIGHT: 4.2,
   SHOULDER: 2.6,
-  AIR_Y: { easy: 14.2, normal: 15.2, hard: 16.2 },
-  ORBIT_R: { easy: 12, normal: 13.5, hard: 15 },
+  /**
+   * ⚠ 契约 §4 修订（Lead P0）后再按**实测**收敛：
+   * 契约修订值 5.2/5.8/6.4 仍然出画 —— 实测扫描（--ndc，真实交战距离 13m、
+   * 相机投影胸口世界坐标）：
+   *     base 6.4 → ndcY 1.216 | 5.8 → 1.106 | 5.2 → 1.025 | 4.6 → 0.949 |
+   *     4.0 → 0.876(进画面)  | 3.6 → 0.828 | 3.2 → 0.780
+   * 画面内占比要从 0% 变成硬验收要求的 ≥95%，base 必须 ≤ ~4.3m。
+   * 取 normal=3.6（胸口 6.0m，实测 ndcY 0.83，留 0.09 余量），
+   * 仍满足「离地 2 个角色高、近战扫掠线(y≈1.4)与胸口差 4.6m ≫ 命中半径 3.2m」→ 近战照样够不到。
+   */
+  /**
+   * 悬浮高度（契约修订值 5.2/5.8/6.4 再按"整只入画"实测收敛）：
+   * 装了 camFrame 取景覆盖（frac 0.085/pitch 0.26）后，实测 base 5.82 时
+   *   脚底 ndcY 0.43~0.46 ✓、法轮顶 0.93~1.09 ✗（上沿被切，两端都在画面内的帧只有 52%）。
+   * 按 0.124 ndcY/m 反推：两端都进 |ndcY|≤0.95 要求 base ≤ 4.53m，故取 normal=4.5。
+   */
+  AIR_Y: { easy: 4.0, normal: 4.5, hard: 5.0 },
+  /**
+   * 默认机位（camera.js 还没接 camFrame 时的兜底高度）：实测扫描（--ndc）
+   *   base 6.4→ndcY 1.216 | 5.8→1.106 | 5.2→1.025 | 4.6→0.949 | 4.0→0.876 | 3.6→0.828
+   * 默认机位只能看到 ~4.3m 以下的悬浮体，所以没接取景覆盖时自动降到这一档，
+   * 保证"用户第一眼必须看得见"（Lead P0）。接了 camFrame 后自动升回 AIR_Y。
+   */
+  AIR_Y_FALLBACK: { easy: 3.0, normal: 3.4, hard: 3.8 },
+  /** Boss 取景（HOOKS.camFrame）：机位拉远 + 压低俯角，让 4.2m 本体两端都进画 */
+  FRAME: { frac: 0.085, pitch: 0.26, fracMin: 0.075, ease: 4.6 },   // ease≈0.7s
+  FRAME_NEUTRAL: { frac: 0.15, pitch: 0.4, fracMin: 0.13 },
+  /** 环绕中心改为**宿傩**、半径 4~5m：相机永远框住宿傩（那是玩家的交战对象），
+   *  所以"它一定在画面里"不再依赖相机偏航；同时语义上是"宿傩的式神悬在宿傩身边"。 */
+  ORBIT_LOCAL: { easy: 4, normal: 4.5, hard: 5 },
+  DESCEND_FROM: 18,
+  ORBIT_R: { easy: 12, normal: 13.5, hard: 15 },   // 旧的"绕玩家"半径（保留常量，巡航用 ORBIT_LOCAL）
   AIR_SPEED: { easy: 8, normal: 10, hard: 12 },
+  BLOCK_P: 0.3,            // 悬浮态近战扫到本体时的偶发「挡下」概率（Lead 允许的手感）
+  BLOCK_TRANSFER: 0.35,    // 挡下时转记到魔虚罗头上的伤害比例
+  EVADE_SIDE: 26,          // 预判侧移的巡航横向速度 m/s
+  EVADE_BURST: 55,         // 前 0.12s 的爆发侧移速度（弹道 3 帧就穿过命中球，匀速 26m/s 根本闪不开）
+  EVADE_BURST_T: 0.12,
   HIT_R: { easy: 2.4, normal: 2.0, hard: 1.7 },
   EVADE_LEAD: 0.35,
+  /** 预判侧移概率。契约原值 0.30/0.55/0.75 在新高度（飞行时间变短）实测命中率 50%，
+   *  偏"容易"；按 Lead P0 第 5 条调高到 0.40/0.70/0.85，实测命中率见报告。 */
   EVADE_P: { easy: 0.3, normal: 0.55, hard: 0.75 },
   DODGE_CD: 1.1,
   DAMAGE_IN_SCALE: 0.7,
@@ -402,6 +444,9 @@ var MAHO = {
   speed: 0,
   yaw: 0,
   orbitA: 0,
+  orbitPhase: 0,
+  orbitW: 0.34,
+  orbitDir: 1,
   baseY: 15.2,
   spawnPos: new Vector3(),
   tele: null,            // 落雷预警 / 俯冲落点
@@ -418,13 +463,18 @@ var MAHO = {
   hintCd: 0,
   hud: { root: null, bar: null, num: null, adapt: null, warn: null, weak: null, state: null, last: "" },
   hudDirty: true,
-  stats: { casts: { slash: 0, lightning: 0, dive: 0, barrage: 0 }, playerHits: 0, dodges: 0, immune: 0, adaptEvents: 0, broken: 0, hint: 0, summons: 0, boltsBlocked: 0 },
+  stats: { casts: { slash: 0, lightning: 0, dive: 0, barrage: 0 }, playerHits: 0, dodges: 0, immune: 0, adaptEvents: 0, broken: 0, hint: 0, summons: 0, boltsBlocked: 0, blocks: 0 },
   hookCalls: { tick: 0, segment: 0, aim: 0, damageGate: 0 },
   lastHitInfo: null,
   /** 探针开关：覆盖"预判侧移"概率（null = 用难度概率）。只在破坏性自测里用 */
   evadeOverride: null,
   /** 探针开关：钉住位置（截图用；mahoUpdateAir 遇到 pin 就不动它） */
-  pin: false
+  pin: false,
+  /** 取景覆盖的插值权重（0=常规取景，1=boss 取景）与最近一次被调用时刻 */
+  frameW: 0,
+  frameT: 0,
+  camFrameLast: -99,
+  lastHeight: 4.07
 };
 
 function mahoIsMeleeSkill(skill) { return skill === SKILL.PUNCH || skill === SKILL.KICK || skill === SKILL.BLACK_FLASH || skill === SKILL.RUSH; }
@@ -436,6 +486,17 @@ function mahoBodyCenter(out) {
   return (out || new Vector3()).set(MAHO.pos.x, MAHO.pos.y + (down ? 1.35 : 2.4), MAHO.pos.z);
 }
 function mahoHitR(cb) { return MAHO_TUNE.HIT_R[mahoDiff(cb)]; }
+/**
+ * 悬浮高度：取景覆盖（HOOKS.camFrame）被 camera.js 真正调用 → 用契约的 5.2/5.8/6.4；
+ * 没人调用（sprint 还没接线）→ 用实测"默认机位也能看见"的兜底高度 3.2/3.6/4.0。
+ * 判断依据是最近 1.5s 内有没有人调 camFrame —— 接上线之后自动升上去，不用改代码。
+ */
+function mahoBaseY(cb) {
+  const nowS = (typeof performance !== "undefined" ? performance.now() : Date.now()) / 1000;
+  const live = (nowS - MAHO.camFrameLast) < 1.5 && MAHO.camFrameLast > 0;
+  const table = live ? MAHO_TUNE.AIR_Y : MAHO_TUNE.AIR_Y_FALLBACK;
+  return table[mahoDiff(cb)];
+}
 
 /** 玩家是否处于锁定（只有锁定时 aim 才会把弹道掰向空中目标） */
 function mahoLockOn() {
@@ -483,8 +544,9 @@ function mahoSummon(cb) {
   MAHO.t = 0;
   MAHO.cd = 1.2;
   MAHO.lastSkill = null;
-  MAHO.baseY = MAHO_TUNE.AIR_Y[mahoDiff(cb)];
+  MAHO.baseY = mahoBaseY(cb);
   MAHO.orbitA = Math.atan2(MAHO.pos.z - pl.p.z, MAHO.pos.x - pl.p.x);
+  MAHO.orbitPhase = 0;
   MAHO.model.root.visible = true;
   MAHO.model.root.position.copy(MAHO.pos);
   MAHO.model.root.scale.setScalar(0.55);
@@ -549,27 +611,39 @@ function mahoSummonUpdate(cb, dt) {
     cb.fx.hitSpark({ pos: s.position.clone(), color: C.GOLD, color2: C.CRIMSON, count: 3, size: 0.4, life: 0.3, speed: 5 });
   }
   // 本体从法阵里升起（0.9~2.0s），再升空（2.0~2.8s）
-  if (t < 0.9) {
-    root.position.set(MAHO.pos.x, -4.2, MAHO.pos.z);
-    root.rotation.y += dt * 0.6;
-    root.scale.setScalar(0.55);
-  } else if (t < 2.0) {
-    const u = (t - 0.9) / 1.1;
-    root.position.set(MAHO.pos.x, mahoLerp(-4.2, 0.15, u), MAHO.pos.z);
-    root.scale.setScalar(mahoLerp(0.55, 1, u));
-    root.rotation.y = mahoLerp(0, MAHO.yaw, u);
-    if (u < 0.12) {
-      cb.fx.debris({ pos: new Vector3(MAHO.pos.x, 0.2, MAHO.pos.z), count: 18, power: 14, color: C.CONCRETE2 });
-      cb.fx.shockwave({ pos: new Vector3(MAHO.pos.x, 0.2, MAHO.pos.z), maxRadius: 14, color: C.CRIMSON, color2: C.GOLD, life: 0.7 });
-      cb.audio.play("land", { volume: 0.7 });
-    }
-  } else {
-    const u = (t - 2.0) / 0.8;
-    const y = mahoLerp(0.15, MAHO.baseY, u * u * (3 - 2 * u));
+  /**
+   * 召唤演出（契约修订版 §4 第 4 条）：从天而降，全程**在画面里**。
+   *   0.00~0.35s 只给法阵/法轮：金色光柱从法阵往上长
+   *   0.35~2.20s 本体从 18m 降落到悬浮高度（ease-out，落得慢，看得清）
+   *   2.20~2.80s 定格：冲击波 + 尘环 + 定格 callout，然后交给 state=air
+   */
+  if (t < 0.35) {
+    root.visible = false;
+    cb.fx.beam({ from: new Vector3(MAHO.pos.x, 0.1, MAHO.pos.z), to: new Vector3(MAHO.pos.x, MAHO_TUNE.DESCEND_FROM, MAHO.pos.z), life: 0.35, color: C.GOLD, radius: 1.1 });
+  } else if (t < 2.2) {
+    const u = (t - 0.35) / 1.85;
+    const e = 1 - Math.pow(1 - u, 3);                 // ease-out：越接近高度落得越慢
+    const y = mahoLerp(MAHO_TUNE.DESCEND_FROM, MAHO.baseY, e);
+    root.visible = true;
     root.position.set(MAHO.pos.x, y, MAHO.pos.z);
     root.scale.setScalar(1);
-    cb.fx.sphere({ pos: root.position.clone().setY(root.position.y + 2), radius: 2.4, color: C.CRIMSON, coreColor: C.GOLD, life: 0.1, charge: 0.5, distort: 0.6 });
-    cb.fx.groundRing({ pos: new Vector3(MAHO.pos.x, 0.06, MAHO.pos.z), maxRadius: 16, color: C.GOLD, color2: C.CRIMSON, life: 0.4 });
+    MAHO.yaw = MAHO.yaw;
+    root.rotation.y = MAHO.yaw;
+    cb.fx.sphere({ pos: root.position.clone().setY(y + 2), radius: 2.2, color: C.CRIMSON, coreColor: C.GOLD, life: 0.08, charge: 0.5, distort: 0.6 });
+    cb.fx.trail && cb.fx.trail({ pos: root.position.clone().setY(y + 1.5), life: 0.35, color: C.GOLD, radius: 0.6 });
+  } else {
+    root.visible = true;
+    root.position.set(MAHO.pos.x, MAHO.baseY, MAHO.pos.z);
+    root.rotation.y = MAHO.yaw;
+    if (!MAHO._landed) {
+      MAHO._landed = true;
+      cb.fx.shockwave({ pos: root.position.clone(), maxRadius: 18, color: C.CRIMSON, color2: C.GOLD, life: 0.7, thickness: 0.9 });
+      cb.fx.groundRing({ pos: new Vector3(MAHO.pos.x, 0.06, MAHO.pos.z), maxRadius: 18, color: C.GOLD, color2: C.CRIMSON, life: 0.8, thickness: 0.9 });
+      cb.fx.debris({ pos: new Vector3(MAHO.pos.x, 0.2, MAHO.pos.z), count: 20, power: 14, color: C.CONCRETE2 });
+      cb.fx.screen({ flash: 0.35, color: C.GOLD, shake: 0.6, life: 0.4 });
+      cb.audio.play("land", { volume: 0.8 });
+    }
+    MAHO.pos.y = MAHO.baseY;
   }
   // 面向玩家
   const pl = cb.fighters[SIDE.GOJO];
@@ -586,6 +660,7 @@ function mahoSummonUpdate(cb, dt) {
   }
   if (t >= MAHO_TUNE.SUMMON_LOCK) {
     MAHO._cried = false;
+    MAHO._landed = false;
     MAHO.state = "air";
     MAHO.t = 0;
     MAHO.pos.set(MAHO.pos.x, MAHO.baseY, MAHO.pos.z);
@@ -632,16 +707,51 @@ function mahoUpdateAir(cb, dt, t) {
   const pl = cb.fighters[SIDE.GOJO];
   const R = MAHO_TUNE.ORBIT_R[diff];
   const spd = MAHO_TUNE.AIR_SPEED[diff];
-  // 环绕：角速度让切向速度 ≈ 0.7 * 上限，玩家跑动时靠 chase 补足到上限
-  MAHO.orbitA += dt * (0.62 + (MAHO.softRage ? 0.22 : 0));
+  /**
+   * 环绕航线：锚定在"玩家→宿傩"轴两侧 ±60° 的**前半场**。
+   * 原来是无约束绕圈，后半个圆周会漂到相机背后 —— 相机在玩家背后 6~8m，
+   * 目标贴到镜头前 6m、仰角 54°，半个周期必然完全出画（Lead P0 的实测就是这个现象）。
+   * 限制在前半场后，它始终落在玩家前方 13~20m 的取景带里，也更好瞄。
+   */
+  const sk = cb.fighters[SIDE.SUKUNA];
+  MAHO.orbitPhase += dt * (0.34 + (MAHO.softRage ? 0.12 : 0)) * (MAHO.orbitDir || 1);
+  /**
+   * 航线轴 = **相机视线在水平面的投影**。
+   * 用"玩家→宿傩"轴做过一版，但机位是 3/4 侧挂（CAM_YAW_SIDE 约 24°），
+   * 于是目标整段贴在画面左缘（实测 ndcX -1.06 ~ -0.71，横向出画）。
+   * 直接取 (相机注视点 - 相机位置) 的水平分量做轴，目标就永远落在取景带里。
+   * 摆动限制 ±0.62rad(±35°)：横向偏移 tan35°=0.70 < 水平半视场 tan36.7°=0.75。
+   */
+  /**
+   * 航线：绕**宿傩**做小幅环巡（半径 ORBIT_LOCAL 4~5m）。
+   * 试过"绕玩家 13.5m"两版：无约束绕圈会漂到相机背后（半圈出画）；
+   * 锚到 player→Sukuna 轴又被 3/4 侧机位甩到画面左缘（实测 ndcX -1.24）。
+   * 而相机在任何时候都框着宿傩，所以把环绕中心放到宿傩身上，
+   * "它在画面里"就变成了结构性保证，同时离地 3.2m 仍在玩家近战射程外（胸口 5.6m > 1.4+3.2）。
+   */
+  const Rloc = MAHO_TUNE.ORBIT_LOCAL[mahoDiff(cb)];
+  /**
+   * 航线形状：绕宿傩的**侧向**往返（垂直于"玩家→宿傩"轴） + 少量前后摆动。
+   * 为什么不是圆周：绕圈会有一半时间停在宿傩**背后**，玩家的 赫/开 会先炸在宿傩身上
+   * （实测纯圆周时 16 次施放只命中 5 次，且 0 次触发闪避 —— 弹道根本没飞到）。
+   * 侧向航线让弹道永远有净空，同时到相机的进深基本不变 → 可见性也稳。
+   */
+  MAHO.orbitPhase += 0;                       // 相位已在上面推进
+  const ax = sk.p.x - pl.p.x, az = sk.p.z - pl.p.z;
+  const al = Math.hypot(ax, az) || 1;
+  const perpX = -az / al, perpZ = ax / al;
+  const lat = Math.sin(MAHO.orbitPhase) * Rloc;
+  const back = Math.cos(MAHO.orbitPhase * 0.5) * 1.4;
+  MAHO.orbitCx = sk.p.x;
+  MAHO.orbitCz = sk.p.z;
   if (MAHO.dodgeT <= 0) {
-    const wantX = pl.p.x + Math.cos(MAHO.orbitA) * R;
-    const wantZ = pl.p.z + Math.sin(MAHO.orbitA) * R;
-    const wantY = MAHO.baseY + Math.sin(t * 0.7) * 0.9;
+    const wantX = sk.p.x + perpX * lat + (ax / al) * back;
+    const wantZ = sk.p.z + perpZ * lat + (az / al) * back;
+    const wantY = MAHO.baseY + Math.sin(t * 0.7) * 0.55;
     const dx = wantX - MAHO.pos.x, dz = wantZ - MAHO.pos.z;
     const dy = (wantY - MAHO.pos.y) * 2.2;
     const len = Math.hypot(dx, dz) || 1e-4;
-    const step = Math.min(len, spd * dt);
+    const step = Math.min(len, spd * dt);   // 上限 8/10/12 m/s（契约）
     MAHO.pos.x += dx / len * step;
     MAHO.pos.z += dz / len * step;
     MAHO.pos.y += mahoClamp(dy * dt, -spd * dt, spd * dt);
@@ -1286,7 +1396,16 @@ function mahoEnsureHud() {
     '<div data-maho="state" style="font-size:11px;letter-spacing:.14em;color:rgba(255,120,90,.95);margin-top:2px;text-shadow:0 1px 3px #000">悬空 —— 近战够不到，锁定后用术式</div>' +
     '<div data-maho="warn" style="font-size:13px;font-weight:600;letter-spacing:.1em;color:#ffd873;margin-top:4px;text-shadow:0 2px 8px #000,0 0 14px rgba(255,216,115,.6)"></div>' +
     '<div data-maho="weak" style="display:none;font-size:15px;font-weight:700;letter-spacing:.16em;color:#0b0d14;background:#ffd873;padding:2px 8px;margin-top:6px;transform:skewX(-12deg);box-shadow:0 0 22px rgba(255,216,115,.95)">弱点暴露 · 近战可击</div>' +
-    '<div data-maho="mark" style="position:fixed;left:50%;top:20%;display:none;transform:translate(-50%,-50%);z-index:22;pointer-events:none;color:#ffd873;font-size:12px;font-weight:700;letter-spacing:.12em;white-space:nowrap;text-shadow:0 0 10px #000,0 0 8px #ff5a3c">▲ 魔虚罗</div>';
+    '<div data-maho="mark" style="position:fixed;left:50%;top:20%;display:none;transform:translate(-50%,-50%);z-index:22;pointer-events:none;color:#ffd873;font-size:12px;font-weight:700;letter-spacing:.12em;white-space:nowrap;text-shadow:0 0 10px #000,0 0 8px #ff5a3c">' +
+    '<span data-maho="arrow" style="display:inline-block;margin-right:4px;font-size:15px">▲</span><span data-maho="marktext">魔虚罗</span></div>' +
+    '<div data-maho="reticle" style="position:fixed;display:none;width:52px;height:52px;margin:-26px 0 0 -26px;z-index:22;pointer-events:none">' +
+    '<i style="position:absolute;inset:0;border:1px solid rgba(255,216,115,.85);border-radius:50%;box-shadow:0 0 12px rgba(255,216,115,.55),inset 0 0 10px rgba(255,90,60,.35)"></i>' +
+    '<i style="position:absolute;left:50%;top:-9px;width:1px;height:8px;background:#ffd873"></i>' +
+    '<i style="position:absolute;left:50%;bottom:-9px;width:1px;height:8px;background:#ffd873"></i>' +
+    '<i style="position:absolute;top:50%;left:-9px;height:1px;width:8px;background:#ffd873"></i>' +
+    '<i style="position:absolute;top:50%;right:-9px;height:1px;width:8px;background:#ffd873"></i>' +
+    '<i style="position:absolute;left:50%;top:50%;width:5px;height:5px;margin:-2.5px 0 0 -2.5px;background:#ff5a3c;transform:rotate(45deg)"></i>' +
+    "</div>";
   document.body.appendChild(root);
   MAHO.hud.root = root;
   MAHO.hud.bar = root.querySelector('[data-maho="bar"]');
@@ -1296,6 +1415,9 @@ function mahoEnsureHud() {
   MAHO.hud.weak = root.querySelector('[data-maho="weak"]');
   MAHO.hud.state = root.querySelector('[data-maho="state"]');
   MAHO.hud.mark = root.querySelector('[data-maho="mark"]');
+  MAHO.hud.arrow = root.querySelector('[data-maho="arrow"]');
+  MAHO.hud.markText = root.querySelector('[data-maho="marktext"]');
+  MAHO.hud.reticle = root.querySelector('[data-maho="reticle"]');
 }
 function mahoHudShow(on) {
   const h = MAHO.hud;
@@ -1339,14 +1461,34 @@ function mahoUpdateIndicator() {
   const el = MAHO.hud.mark;
   if (!el) return;
   const camObj = (typeof window !== "undefined" && window.__SS && window.__SS.activeCamera) || null;
-  if (!camObj || !MAHO.alive) { if (el.style.display !== "none") el.style.display = "none"; return; }
+  if (!camObj || !MAHO.alive) {
+    if (el.style.display !== "none") el.style.display = "none";
+    if (MAHO.hud.reticle && MAHO.hud.reticle.style.display !== "none") MAHO.hud.reticle.style.display = "none";
+    return;
+  }
   const v = mahoBodyCenter(new Vector3()).project(camObj);
   const inside = v.z < 1 && v.x > -0.92 && v.x < 0.92 && v.y > -0.9 && v.y < 0.86;
+  const d = MAHO.cb && MAHO.cb.fighters ? MAHO.cb.fighters[SIDE.GOJO].p.distanceTo(MAHO.pos) : 0;
+  // 锁定（Q）时在目标身上画准星：低空目标躲在楼后面时也能瞄
+  const ret = MAHO.hud.reticle;
+  if (ret) {
+    const want = inside && mahoLockOn();
+    if (want) {
+      ret.style.display = "block";
+      ret.style.left = ((v.x * 0.5 + 0.5) * 100).toFixed(2) + "%";
+      ret.style.top = ((-v.y * 0.5 + 0.5) * 100).toFixed(2) + "%";
+    } else if (ret.style.display !== "none") ret.style.display = "none";
+  }
   if (inside) { if (el.style.display !== "none") el.style.display = "none"; return; }
+  // 出画：贴在屏幕边缘 + 朝目标方向的三角 + 距离
   const x = mahoClamp(v.x, -0.92, 0.92);
   const y = mahoClamp(v.y, -0.88, 0.84);
-  const d = MAHO.cb && MAHO.cb.fighters ? MAHO.cb.fighters[SIDE.GOJO].p.distanceTo(MAHO.pos) : 0;
-  el.textContent = "▲ 魔虚罗 " + Math.round(d) + "m（悬空）";
+  if (MAHO.hud.markText) MAHO.hud.markText.textContent = "魔虚罗 " + Math.round(d) + "m（悬空）";
+  if (MAHO.hud.arrow) {
+    const ux = v.x, uy = -v.y;                       // 屏幕方向（y 向下为正）
+    const ang = Math.atan2(ux, -uy) * 180 / Math.PI; // ▲ 默认朝上
+    MAHO.hud.arrow.style.transform = "rotate(" + ang.toFixed(1) + "deg)";
+  }
   el.style.left = ((x * 0.5 + 0.5) * 100).toFixed(2) + "%";
   el.style.top = ((-y * 0.5 + 0.5) * 100).toFixed(2) + "%";
   if (el.style.display !== "block") el.style.display = "block";
@@ -1414,9 +1556,14 @@ function mahoDebug() {
     meshCount: MAHO.model ? mahoCountMeshes(MAHO.model.root) : 0,
     partCount: MAHO.model ? MAHO.model.parts.length : 0,
     hint: MAHO.stats.hint,
+    blocks: MAHO.stats.blocks || 0,
+    probeNear: { samples: MAHO.nearSamples || 0, minLast: MAHO.nearLast, min: MAHO.nearMinSq === undefined ? null : +Math.sqrt(MAHO.nearMinSq).toFixed(2), last: MAHO.nearLast, hitR: MAHO_TUNE.HIT_R[mahoDiff(MAHO.cb || {})] },
     summons: MAHO.stats.summons,
     evadeOverride: MAHO.evadeOverride,
     pin: MAHO.pin,
+    baseY: +MAHO.baseY.toFixed(2),
+    modelHeight: MAHO.lastHeight,
+    camFrame: { calls: MAHO.hookCalls.camFrame || 0, w: +MAHO.frameW.toFixed(3), live: mahoBaseY(MAHO.cb) === MAHO_TUNE.AIR_Y[mahoDiff(MAHO.cb || {})] },
     difficulty: mahoDiff(MAHO.cb || {}),
     lockOn: mahoLockOn()
   };
@@ -1436,9 +1583,16 @@ MahoragaPhase.metrics = function () {
   const v = new Vector3();
   let n = 0;
   const tops = [];
+  const isRing = (mesh) => mesh.geometry && mesh.geometry.type === "TorusGeometry";
   for (const mesh of m.parts) {
     if (!mesh.visible || !mesh.geometry) continue;
     if (mesh === m.shadow) continue;      // 地面投影不是本体，别计入尺寸
+    /**
+     * ⚠ 圆环（法轮外/内环）在自身平面内持续自转，用"几何包围盒 8 个角点"求世界极值会虚高：
+     * 角点到圆心 0.45×√2 = 0.637，实测把总高从真值 4.07 抬到 4.23。
+     * 这里跳过圆环，改用"轮心 + 半径"精确算它的最高点。
+     */
+    if (isRing(mesh)) continue;
     if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
     const bb = mesh.geometry.boundingBox;
     if (!bb) continue;
@@ -1455,7 +1609,15 @@ MahoragaPhase.metrics = function () {
       if (v.z > maxZ) maxZ = v.z;
     }
   }
+  // 法轮外环的最高点 = 轮心 + (半径 + 管半径)（轮面近似水平，x 倾角 ≤0.12rad）
+  if (m.bones.wheel) {
+    const wy = m.bones.wheel.getWorldPosition(new Vector3()).y;
+    const ringTop = wy + 0.45 * Math.cos(m.bones.wheel.rotation.x);
+    if (ringTop > maxY) maxY = ringTop;
+    if (ringTop > minY) { /* 只关心高度 */ }
+  }
   const feet = MAHO.pos.y;
+  MAHO.lastHeight = +(maxY - feet).toFixed(3);
   // 最高的三个零件（排查"到底什么把高度撑爆了"用）
   const topList = tops.map((t) => {
     let hi = -Infinity;
@@ -1472,8 +1634,9 @@ MahoragaPhase.metrics = function () {
     if (m.bones[bn]) boneY[bn] = +(m.bones[bn].getWorldPosition(new Vector3()).y - feet).toFixed(3);
   }
   // 肩宽：两侧肩甲外缘（肩骨位置 ± 肩甲半宽 0.3）——契约要的是这个，不是整机包围盒
-  const sL = m.bones.shoulderL ? m.bones.shoulderL.getWorldPosition(new Vector3()).x : 0;
-  const sR = m.bones.shoulderR ? m.bones.shoulderR.getWorldPosition(new Vector3()).x : 0;
+  // 肩宽：用骨骼**局部**位置量（世界坐标随姿态在 2.38~2.57 间漂，契约要的是建模尺寸 2.6）
+  const sL = m.bones.shoulderL ? m.bones.shoulderL.position.x : 0;
+  const sR = m.bones.shoulderR ? m.bones.shoulderR.position.x : 0;
   const shoulder = Math.abs(sL - sR) + 0.6;
   return {
     meshes: n,
@@ -1613,6 +1776,12 @@ function mahoHitTest(cb, p0, p1, radius, meta) {
   const rr = radius + R;
   const distSq = mahoPointSegDistSq(center.x, center.y, center.z, p0.x, p0.y, p0.z, p1.x, p1.y, p1.z);
   const wouldHit = distSq <= rr * rr;
+  // 探针诊断：记录弹道最近距离（不参与玩法判定）
+  if (!melee) {
+    MAHO.nearSamples = (MAHO.nearSamples || 0) + 1;
+    if (distSq < (MAHO.nearMinSq === undefined ? Infinity : MAHO.nearMinSq)) MAHO.nearMinSq = distSq;
+    MAHO.nearLast = +Math.sqrt(distSq).toFixed(2);
+  }
   if (melee) {
     const weak = MAHO.state === "down" || (MAHO.state === "ascend" && MAHO.t < 0.35);
     if (!weak) {
@@ -1626,11 +1795,36 @@ function mahoHitTest(cb, p0, p1, radius, meta) {
       }
       return false;
     }
-    if (!wouldHit) return false;
-    if (meta && meta.attack) meta.attack.__mahoHit = true;
-    else MAHO.meleeCd = 0.18;
-    mahoApplyHit(cb, meta, (meta && meta.dmg) || 0, { weak: true });
-    return true;
+    if (wouldHit) {
+      // 弱点窗口：正常吃判定，伤害转记到魔虚罗头上并给足反馈
+      if (meta && meta.attack) meta.attack.__mahoHit = true;
+      else MAHO.meleeCd = 0.18;
+      mahoApplyHit(cb, meta, (meta && meta.dmg) || 0, { weak: true });
+      cb.fx.callout({ text: "弱点", sub: "近战命中", pos: center.clone().setY(center.y + 0.8), color: C.GOLD, color2: C.CRIMSON, life: 0.7, size: 1, rise: 0.9 });
+      return true;
+    }
+    /**
+     * 悬浮态的偶发「挡下」。
+     * Lead P0：contract 要求玩家近战打宿傩始终吃 ×0.6，**不能**无条件吃掉攻击。
+     * 所以只有几何上真扫到本体（6.9m 高的胸口命中球）时才按 30% 概率挡下：
+     *   - 明确演出：「挡下」字样 + 金色火花 + 法轮闪光 + 音效
+     *   - 伤害**转记到魔虚罗头上**（它的血条会掉），不是凭空消失
+     * 玩家在宿傩身前地面的常规平A 扫不到那个球 → 永远不会被吃，宿傩照常吃 ×0.6。
+     */
+    if (wouldHit && Math.random() < MAHO_TUNE.BLOCK_P) {
+      if (meta && meta.attack) meta.attack.__mahoHit = true;
+      else MAHO.meleeCd = 0.18;
+      const raw = (meta && meta.dmg) || 0;
+      MAHO.stats.blocks = (MAHO.stats.blocks || 0) + 1;
+      MAHO.shakeT = 0.4;
+      mahoApplyHit(cb, meta, Math.max(1, raw * MAHO_TUNE.BLOCK_TRANSFER), { weak: false });
+      cb.fx.callout({ text: "挡下", sub: "退魔之剑", pos: center.clone().setY(center.y + 0.5), color: C.GOLD, color2: C.WHITE, life: 0.8, size: 1.1, rise: 1 });
+      cb.fx.hitSpark({ pos: center.clone(), color: C.GOLD, color2: C.WHITE, count: 18, size: 0.6, life: 0.35, speed: 11 });
+      cb.audio.play("guard_infinity", { volume: 0.6 });
+      cb.pushEvent({ type: "mahoraga_block", dmg: Math.round(raw * MAHO_TUNE.BLOCK_TRANSFER) });
+      return true;
+    }
+    return false;   // 扫到了但没挡下 → 交给宿傩那条既有结算路径（近战对宿傩 ×0.6）
   }
   // 术式：几何命中后才考虑预判侧移
   if (!wouldHit) return false;
@@ -1660,6 +1854,7 @@ function mahoDodge(cb, p0, p1) {
   const far = Math.hypot(ax - pl.p.x, az - pl.p.z) > Math.hypot(bx - pl.p.x, bz - pl.p.z);
   MAHO.dodgeDir.set(far ? nx : -nx, 0, far ? nz : -nz);
   MAHO.dodgeT = MAHO_TUNE.EVADE_LEAD;
+  MAHO.dodgeBurst = MAHO_TUNE.EVADE_BURST_T;
   MAHO.dodgeCd = MAHO_TUNE.DODGE_CD;
   MAHO.stats.dodges++;
   mahoEnterPose("hover", 14);
@@ -1706,17 +1901,30 @@ function mahoAim(cb, owner, from, dir, skill) {
  */
 function mahoPredict(center, flight, cb) {
   if (!(flight > 1e-3)) return center.clone();
-  const out = center.clone().addScaledVector(MAHO.vel, flight);
   const pl = cb && cb.fighters ? cb.fighters[SIDE.GOJO] : null;
-  if (pl) {
-    const dx = MAHO.pos.x - pl.p.x, dz = MAHO.pos.z - pl.p.z;
-    const R = Math.max(3, Math.hypot(dx, dz));
-    const v = Math.hypot(MAHO.vel.x, MAHO.vel.z);
-    const a = (v * v) / R;                                  // 向心加速度大小
-    const inv = 1 / R;
-    out.x += 0.5 * a * flight * flight * (-dx * inv);
-    out.z += 0.5 * a * flight * flight * (-dz * inv);
-  }
+  if (!pl) return center.clone().addScaledVector(MAHO.vel, flight);
+  // 环绕中心可能是宿傩（ORBIT_LOCAL），必须用真实中心，否则提前量方向整个错
+  /**
+   * 提前量：航线是绕宿傩的侧向往返（正弦），所以用速度外推 + 用当前航线参数做一次修正。
+   * 简化实现：以当前速度线性外推，再用"下一时刻的正弦位置"迭代两次。
+   */
+  const skp = cb && cb.fighters ? cb.fighters[SIDE.SUKUNA] : null;
+  if (!skp) return center.clone().addScaledVector(MAHO.vel, flight);
+  const a1 = (MAHO.orbitPhase || 0) + (MAHO.orbitW || 0.34) * (MAHO.orbitDir || 1) * flight;
+  const Rloc = MAHO_TUNE.ORBIT_LOCAL[mahoDiff(cb || {})];
+  const ax2 = skp.p.x - pl.p.x, az2 = skp.p.z - pl.p.z;
+  const al2 = Math.hypot(ax2, az2) || 1;
+  const lat = Math.sin(a1) * Rloc;
+  const back = Math.cos(a1 * 0.5) * 1.4;
+  const px = skp.p.x + (-az2 / al2) * lat + (ax2 / al2) * back;
+  const pz = skp.p.z + (ax2 / al2) * lat + (az2 / al2) * back;
+  /**
+   * ⚠ 必须是**纯函数**：上一版在入参 center 上累加修正量，而调用方在迭代里会调 2~3 次，
+   * 修正量被叠加成 2~3 倍，提前量直接偏出命中球（实测命中率从 31% 掉到 0%）。
+   */
+  const out = center.clone();
+  out.x += px - MAHO.pos.x;
+  out.z += pz - MAHO.pos.z;
   return out;
 }
 
@@ -1780,7 +1988,10 @@ function mahoTick(cb, dt, t) {
     // 预判侧移位移
     if (MAHO.dodgeT > 0) {
       MAHO.dodgeT = Math.max(0, MAHO.dodgeT - dt);
-      const sp = 26;
+      // 爆发段（0.12s，55m/s ≈ 6.6m）必须把本体整体挪出命中球，否则弹道照样命中
+      const burst = (MAHO.dodgeBurst || 0) > 0;
+      if (burst) MAHO.dodgeBurst = Math.max(0, MAHO.dodgeBurst - dt);
+      const sp = burst ? MAHO_TUNE.EVADE_BURST : MAHO_TUNE.EVADE_SIDE * 0.4;
       MAHO.pos.x += MAHO.dodgeDir.x * sp * dt;
       MAHO.pos.z += MAHO.dodgeDir.z * sp * dt;
     }
@@ -1872,10 +2083,11 @@ function mahoReset(cb) {
   MAHO.shakeT = 0;
   MAHO.hintCd = 0;
   MAHO.contCd = 0;
+  MAHO.frameW = 0;      // reset 时取景立刻归位（Lead 要求）
   MAHO.pendingForce = null;
   MAHO.poseName = "hover";
   MAHO.poseHold = 0;
-  MAHO.stats = { casts: { slash: 0, lightning: 0, dive: 0, barrage: 0 }, playerHits: 0, dodges: 0, immune: 0, adaptEvents: 0, broken: 0, hint: 0, summons: 0, boltsBlocked: 0 };
+  MAHO.stats = { casts: { slash: 0, lightning: 0, dive: 0, barrage: 0 }, playerHits: 0, dodges: 0, immune: 0, adaptEvents: 0, broken: 0, hint: 0, summons: 0, boltsBlocked: 0, blocks: 0 };
   MAHO.hookCalls = { tick: 0, segment: 0, aim: 0, damageGate: 0 };
   MAHO.lastHitInfo = null;
   mahoKillWave();
@@ -1897,7 +2109,30 @@ function mahoReset(cb) {
   mahoSetWarn("");
 }
 
+/** HOOKS.camFrame：Boss 取景覆盖（sprint 在 camera.js 接线；未接线时没人调用，本组件自动降高度兜底） */
+function mahoCamFrame(snap, def) {
+  // camera.js 的调用形式：firstHook("camFrame", snap, { frac, pitch }) —— 第一参数是战斗快照
+  MAHO.hookCalls.camFrame = (MAHO.hookCalls.camFrame || 0) + 1;
+  const now = (typeof performance !== "undefined" ? performance.now() : Date.now()) / 1000;
+  const dt = MAHO.frameT ? mahoClamp(now - MAHO.frameT, 0, 0.12) : 0.016;
+  MAHO.frameT = now;
+  MAHO.camFrameLast = now;
+  const want = (MAHO.alive && MAHO.state !== "broken" && MAHO.state !== "off") ? 1 : 0;
+  const k = 1 - Math.exp(-MAHO_TUNE.FRAME.ease * dt);
+  MAHO.frameW += (want - MAHO.frameW) * (dt > 0 ? k : 0);
+  if (MAHO.frameW < 0.01 && want === 0) { MAHO.frameW = 0; return null; }   // 归位后交还默认取景
+  const N = MAHO_TUNE.FRAME_NEUTRAL, B = MAHO_TUNE.FRAME, w = MAHO.frameW;
+  return {
+    frac: mahoLerp(N.frac, B.frac, w),
+    pitch: mahoLerp(N.pitch, B.pitch, w),
+    fracMin: mahoLerp(N.fracMin, B.fracMin, w),
+    w: +w.toFixed(3),
+    src: "mahoraga"
+  };
+}
+
 /* -------- 注册钩子 -------- */
+onHook("camFrame", (cb) => mahoCamFrame(cb));
 onHook("combatInit", (cb) => {
   MAHO.cb = cb;
   MAHO.hpMax = MAHO_TUNE.HP;

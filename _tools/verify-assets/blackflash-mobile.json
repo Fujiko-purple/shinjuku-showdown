@@ -1,0 +1,103 @@
+{
+  "name": "blackflash-mobile",
+  "file": "tmp/verifier/dist.html",
+  "url": "file:///C%3A/Users/Administrator/Desktop/dsh/%E6%96%B0%E5%AE%BF%E5%AF%B9%E5%86%B3/tmp/verifier/dist.html",
+  "mobile": true,
+  "viewport": [
+    844,
+    390
+  ],
+  "boot": {
+    "state": "fight",
+    "hasSS": true,
+    "quality": "low",
+    "keys": "state,snap,cam,scene,godCam,activeCamera,combat,fx,weapons,audio,city,render,cutscene,gojo,sukuna,quality,stats,mahoraga,blackFlash,hooks,mech,duel",
+    "isTouch": true,
+    "hasInject": true,
+    "hasTouch": true,
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "w": 844,
+    "h": 390,
+    "tap": "getSnapshot"
+  },
+  "results": [
+    {
+      "name": "产物可启动并进入 fight",
+      "pass": true,
+      "detail": "state=fight"
+    },
+    {
+      "name": "契约 §1.3 MECH_DEBUG.blackFlash 已注册",
+      "pass": true,
+      "detail": "{\"F\":-1,\"P\":-999,\"delta\":0,\"ok\":false,\"ce\":100,\"ceAtJudge\":-1,\"chaos\":0,\"streak\":0,\"mul\":0,\"hits\":0,\"fails\":0,\"bf\":0,\"cd\":0,\"win\":2,\"mulNext\":2.5,\"presses\":0,\"legit\":0,\"mashes\":0,\"masteryT\":0,\"chaosActive\":false,\"touch\":true,\"why\":\"\",\"ringsSpawned\":0,\"ringsSnapped\":0,\"dotsSpawned\":0,\"ringErrMax\":0}"
+    },
+    {
+      "name": "blackFlash 自报字段齐全（契约 §1.3）",
+      "pass": true,
+      "detail": "缺 []"
+    },
+    {
+      "name": "校准：轻击能命中（拿到命中帧间距）",
+      "pass": true,
+      "detail": "Δ帧=20 amount=3"
+    },
+    {
+      "name": "扫帧：至少一次同步成功（|delta| <= 1）",
+      "pass": true,
+      "detail": "成功集合=[1,1]"
+    },
+    {
+      "name": "扫帧：|delta| >= 3 必须失败",
+      "pass": true,
+      "detail": "|delta|>=3 的判定=[{\"delta\":3,\"ok\":false,\"streak\":0},{\"delta\":825,\"ok\":false,\"streak\":1},{\"delta\":450,\"ok\":false,\"streak\":1},{\"delta\":436,\"ok\":false,\"streak\":0},{\"delta\":452,\"ok\":false,\"streak\":0}]"
+    },
+    {
+      "name": "扫帧：判定与 |delta| 自洽（ok 只出现在 |delta| <= 2）",
+      "pass": true,
+      "detail": "成功的 delta 集合=[1,1]"
+    },
+    {
+      "name": "§6 黑闪伤害 >= 同招普通命中 2.4 倍（用 hp 真值）",
+      "pass": true,
+      "detail": "真值比=2.875 (7.47/2.60)；取整后 7/3=2.33"
+    },
+    {
+      "name": "§6 成功时事件流带 blackFlash 标记",
+      "pass": true,
+      "detail": "hit 事件 blackFlash=true"
+    },
+    {
+      "name": "§6 黑闪命中后 stats.blackFlash +1",
+      "pass": true,
+      "detail": "before=0 after=2"
+    },
+    {
+      "name": "§6 随机按 V 500 次 → 黑闪 0 次",
+      "pass": true,
+      "detail": "stats delta=0 采样帧=1362"
+    },
+    {
+      "name": "§6 每帧按 V（连点）+ 连续攻击 → 黑闪 0 次",
+      "pass": true,
+      "detail": "stats delta=0 命中=12 黑闪事件=0"
+    },
+    {
+      "name": "§6 连点期间仍然能打出普通命中（不打断操作）",
+      "pass": true,
+      "detail": "命中事件=12"
+    },
+    {
+      "name": "§6 触屏窗口放宽（|delta|=2 也能同步）",
+      "pass": true,
+      "detail": "delta=2 ok=true"
+    },
+    {
+      "name": "全流程无页面错误",
+      "pass": true,
+      "detail": "[]"
+    }
+  ],
+  "notes": [],
+  "pageErrors": [],
+  "seconds": 60.2
+}

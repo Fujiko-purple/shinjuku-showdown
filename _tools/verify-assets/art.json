@@ -1,0 +1,58 @@
+{
+  "name": "art",
+  "file": "tmp/verifier/dist.html",
+  "url": "file:///C%3A/Users/Administrator/Desktop/dsh/%E6%96%B0%E5%AE%BF%E5%AF%B9%E5%86%B3/tmp/verifier/dist.html",
+  "mobile": false,
+  "viewport": [
+    1280,
+    720
+  ],
+  "boot": {
+    "state": "fight",
+    "hasSS": true,
+    "quality": "medium",
+    "keys": "state,snap,cam,scene,godCam,activeCamera,combat,fx,weapons,audio,city,render,cutscene,gojo,sukuna,quality,stats,mahoraga,blackFlash,hooks,mech,duel",
+    "isTouch": false,
+    "hasInject": true,
+    "hasTouch": true,
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "w": 1280,
+    "h": 720,
+    "tap": "getSnapshot"
+  },
+  "results": [
+    {
+      "name": "普通战斗 HUD 无越界元素",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "魔虚罗 HUD 血条/名字存在",
+      "pass": true,
+      "detail": "[{\"text\":\"/* ===========================\",\"id\":\"\",\"cls\":\"\",\"x\":0,\"y\":0,\"w\":0,\"h\":0,\"color\":\"rgb(232, 230, 223)\",\"fs\":\"16px\",\"visible\":false},{\"text\":\"咒力\",\"id\":\"\",\"cls\":\"stat-label\",\"x\":23,\"y\":61,\"w\":27,\"h\":20,\"color\":\"rgba(232, 230, 223, 0.78)\",\"fs\":\"12px\",\"visible\":true},{\"text\":\"非商业同人作品 · 招式与人设参考《咒术回战》\",\"id\":\"\",\"cls\":\"\",\"x\":0,\"y\":0,\"w\":0,\"h\":0,\"color\":\"rgba(232, 230, 223, 0.34)\",\"fs\":\"12px\",\"visible\":false},{\"text\":\"宿傩的咒力残秽正在消散\",\"id\":\"result-sub\",\"cls\":\"\",\"x\":0,\"y\":0,\"w\":0,\"h\":0,\"color\":\"rgba(232, 230, 223, 0.72)\",\"fs\":\"13px\",\"visible\":false},{\"text\":\"(() => {\\n  var __defProp = Obj\",\"id\":\"\",\"cls\":\"\",\"x\":0,\"y\":0,\"w\":0,\"h\":0,\"color\":\"rgb(232, 230, 223)\",\"fs\":\"16px\",\"visible\":false},{\"text\":\"八握剑异戒神将\",\"id\":\"\",\"cls\":\"\",\"x\":1048,\"y\":83,\"w\":91,\"h\":14,\"color\":\"rgba(255, 216, 115, 0.9)\",\"fs\":\"11px\",\"visible\":true}]"
+    },
+    {
+      "name": "魔虚罗 HUD 无越界元素",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "领域对决自建 HUD 存在（同步轴）",
+      "pass": true,
+      "detail": "[{\"text\":\"/* ===========================\",\"id\":\"\",\"cls\":\"\",\"x\":0,\"y\":0,\"w\":0,\"h\":0,\"color\":\"rgb(232, 230, 223)\",\"fs\":\"16px\",\"visible\":false},{\"text\":\"咒力\",\"id\":\"\",\"cls\":\"stat-label\",\"x\":23,\"y\":61,\"w\":27,\"h\":20,\"color\":\"rgba(232, 230, 223, 0.78)\",\"fs\":\"12px\",\"visible\":true},{\"text\":\"非商业同人作品 · 招式与人设参考《咒术回战》\",\"id\":\"\",\"cls\":\"\",\"x\":0,\"y\":0,\"w\":0,\"h\":0,\"color\":\"rgba(232, 230, 223, 0.34)\",\"fs\":\"12px\",\"visible\":false},{\"text\":\"宿傩的咒力残秽正在消散\",\"id\":\"result-sub\",\"cls\":\"\",\"x\":0,\"y\":0,\"w\":0,\"h\":0,\"color\":\"rgba(232, 230, 223, 0.72)\",\"fs\":\"13px\",\"visible\":false},{\"text\":\"(() => {\\n  var __defProp = Obj\",\"id\":\"\",\"cls\":\"\",\"x\":0,\"y\":0,\"w\":0,\"h\":0,\"color\":\"rgb(232, 230, 223)\",\"fs\":\"16px\",\"visible\":false},{\"text\":\"八握剑异戒神将\",\"id\":\"\",\"cls\":\"\",\"x\":0,\"y\":0,\"w\":0,\"h\":0,\"color\":\"rgba(255, 216, 115, 0.9)\",\"fs\":\"11px\",\"visible\":false},{\"text\":\"魔虚罗\",\"id\":\"\",\"cls\":\"\",\"x\":0,\"y\":0,\"w\":0,\"h\":0,\"color\":\"rgb(255, 255, 255)\",\"fs\":\"16px\",\"visible\":false},{\"text\":\"适应 0/8\",\"id\":\"\",\"cls\":\"\",\"x\":0,\"y\":0,\"w\":0,\"h\":0,\"color\":\"rgb(255, 216, 115)\",\"fs\":\"11px\",\"visible\":false}]"
+    },
+    {
+      "name": "领域对决 HUD 无越界元素",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "全流程无页面错误",
+      "pass": true,
+      "detail": "[]"
+    }
+  ],
+  "notes": [],
+  "pageErrors": [],
+  "seconds": 35.8
+}

@@ -64,6 +64,7 @@ function firstHook(name, ...args) { ... } // 只调第一个
 | `api.reset()` | `reset` | |
 | `hud.js` 每帧 | `hud` | |
 | `DomainRunner` 构造 | `clash` | |
+| `camera.js` 常规取景算完后 | `camFrame` | 返回 `{frac,pitch,lookH,fracMin}` 覆盖取景（魔虚罗升空用） |
 
 ### 1.2 combat 提供的公共设施（队友直接用，不要改）
 

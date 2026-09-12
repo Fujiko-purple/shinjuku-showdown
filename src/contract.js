@@ -113,8 +113,13 @@
     // (combat2)->clash 实例       领域对决（唯一实现）
     move: [],
     // (cb,c,wish,dt,inp)          移动速度乘区
-    locomotion: []
+    locomotion: [],
     // (cb,c,info)->bool           移动动画状态机
+    camFrame: []
+    // (snap,{frac,pitch})->{frac?,pitch?,lookH?,fracMin?}|null
+    //   取景覆盖：机位模块算完常规取景后交给机制模块改。
+    //   用途：魔虚罗升到空中后，常规「俯视交战点」的机位只能看到地面往上 6.2m，
+    //   空中的目标必然出画 —— 这里允许把机位拉远（frac 变小）并压低俯角（pitch 变小）。
   };
   /**
    * 机制模块的调试快照出口。

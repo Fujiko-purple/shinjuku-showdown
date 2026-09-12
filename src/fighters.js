@@ -3151,6 +3151,10 @@
       hips: [1.35, 1.85, 1.95], core: [1.45, 1.7, 1.95], chest: [1.45, 1.7, 1.95]
     }
   };
+  /* 步态档位：idle 0 / walk 1 / run 2 / sprint 3（用于"只升不降"的判断） */
+  function gaitRank(n) {
+    return n === "sprint" ? 3 : n === "run" ? 2 : n === "walk" ? 1 : 0;
+  }
   function createSampler(lib, overrides) {
     const cache = /* @__PURE__ */ new Map();
     const zero = P(0, 0, 0);
@@ -3848,9 +3852,16 @@
          * 只有玩家自己（gojo）有 sprint 强度；宿傩的 amt 恒为 0，行为与改前一致。
          */
         if (sprint.amt > 0.01) {
-          if (sprint.prog >= SPRINT.PHASE_SPRINT) wantAnim = "sprint";
-          else if (sprint.prog >= SPRINT.PHASE_RUN) wantAnim = "run";
-          else if (spd >= WALK_SPEED * 0.5) wantAnim = "walk";
+          const byProg = sprint.prog >= SPRINT.PHASE_SPRINT ? "sprint" : sprint.prog >= SPRINT.PHASE_RUN ? "run" : "walk";
+          /**
+           * 疾跑档位在这个窗口里**完全权威**（不掺和上面那套速度阈值）：
+           *   起步中（dashHeld）→ wantAnim = byProg，三段 walk→run→sprint 严格单调；
+           *   回落中           → 只允许降档（rank 更小），别被残留的高速又推上去。
+           * 为什么要这么写：起步第一帧的原始启发式会把 wantAnim 判成 run/其它档，
+           * 下一帧再被 prog 压回 walk，就会触发一次"下行"切换（0.34s 冷却），
+           * 结果整个 0.35s 起步只剩两档动画（实测 anim 序列 idle→walk→sprint）。
+           */
+          if (sprint.dashHeld || gaitRank(byProg) <= gaitRank(wantAnim)) wantAnim = byProg;
         }
         /**
          * 兜底：只要这一帧确实收到了移动指令（能走到这里就说明有输入），就**至少播走**。
@@ -3889,7 +3900,7 @@
            * 而"进/出 idle"必须干脆，否则角色会以站姿在地面上滑行。
            * 所以：步态之间 0.34s（> 交叉淡入 0.2s，保证每次都过渡完），跨界 0.12s。
            */
-          const rank = (n) => n === "sprint" ? 3 : n === "run" ? 2 : n === "walk" ? 1 : 0;
+          const rank = gaitRank;
           const bothLoco = rank(curName) >= 1 && rank(wantAnim) >= 1;
           /**
            * 上行（走→跑→冲）用短冷却：疾跑起步只有 0.35s，三档各占 0.1s 左右，
@@ -3897,8 +3908,17 @@
            * 中间的 run 从没播过）。下行/同级抖动仍然是 0.34s —— 那条防抖是为了挡住
            * "出招降速时 want 在阈值附近来回跳 = 每帧重起手 = 动作僵硬"的老问题。
            */
-          const ascending = bothLoco && rank(wantAnim) > rank(curName);
-          gaitCd = bothLoco ? (ascending ? 0.14 : 0.34) : 0.12;
+          // dashHeld（正在提速）也算上行：档位是单调的，直接切掉冷却才不会吞档
+          const ascending = bothLoco && (rank(wantAnim) > rank(curName) || sprint.dashHeld);
+          /**
+           * 上行（走→跑→冲）**立即切**、不设冷却。疾跑起步只有 0.35s：
+           * 实测第一帧 idle→walk 就把冷却设成 0.12~0.34s，等它过期时 prog 早就 >0.62，
+           * "run" 那一档在整个起步过程里一次都没播过（anim 序列 idle→walk→sprint）。
+           * 上行不可能抖动（prog 只增不减，每档最多请求一次），所以不需要冷却；
+           * 下行/同级仍保留 0.34s —— 那条防抖是为了挡住"出招降速时 want 在阈值附近
+           * 来回跳 = 每帧重起手 = 动作僵硬"的老问题（60 秒压测 1183ms 才过渡完那次）。
+           */
+          gaitCd = bothLoco ? (ascending ? 0 : 0.34) : 0.12;
         } else if (wantAnim !== curName) {
           dbg.blocked++;
         }

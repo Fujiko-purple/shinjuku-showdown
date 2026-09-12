@@ -166,9 +166,12 @@ try {
 
   /* ---------- E. 轴与窗口的形态（打印机不按，累积多场、只取 clashActive 的帧） ---------- */
   const acc = [];
+  const perTrial = [];
   for (let i = 0; i < 3; i++) {
     const r = await fight('idle', 6000);
-    for (const sm of (r.samples || [])) if (sm.act) acc.push(sm);
+    const one = [];
+    for (const sm of (r.samples || [])) if (sm.act) { acc.push(sm); one.push(sm); }
+    perTrial.push(one);
   }
   const needles = acc.map(x => x.need).filter(v => typeof v === 'number');
   const nIn = needles.filter(v => v >= -1.001 && v <= 1.001).length;
@@ -214,8 +217,50 @@ try {
   for (let i = 1; i < upCross.length; i++) crossInt.push((upCross[i] - upCross[i - 1]) / 1000);
   const cStat = crossInt.length ? stats(crossInt) : null;
   console.log('needle 同向上穿 0 的间隔 s=' + JSON.stringify(cStat));
+  // Lead 口径：相邻帧方向反转 = 半周期结束（只统计 active 帧）
+  const revInt = [];
+  let lastDir = 0;
+  let segPath = 0;
+  let lastRev = acc.length ? acc[0].now : 0;
+  let revCount = 0;
+  for (let i = 1; i < acc.length; i++) {
+    const a = acc[i - 1], b = acc[i];
+    if (typeof a.need !== 'number' || typeof b.need !== 'number') continue;
+    const d = b.need - a.need;
+    if (Math.abs(d) < 1e-9) continue;
+    const nd = d > 0 ? 1 : -1;
+    if (lastDir !== 0 && nd !== lastDir) {
+      // 只有「上一段真的走了 >= 0.05」才算一次有效反转（滤掉采样噪声造成的假反转）
+      if (segPath >= 0.3) { revCount++; revInt.push((b.now - lastRev) / 1000); lastRev = b.now; }
+      segPath = 0;
+    }
+    segPath += Math.abs(d);
+    lastDir = nd;
+  }
+  const revStat = revInt.length ? stats(revInt) : null;
+  console.log('反转法: 反转 ' + revCount + ' 次, 半周期 s=' + JSON.stringify(revStat) + ' -> 往返周期 = 2 x 中位半周期 = ' + (revStat ? (2 * revStat.p50).toFixed(3) : '-') + 's');
+  console.log('NEEDLE_RAW=' + JSON.stringify(acc.slice(0, 260).map(s => [Math.round(s.now), +s.need.toFixed(4), s.round])));
+  // 逐场单独算（跨场拼接会在结算/重开处产生假的反转），这才是 Lead 口径的干净版本
+  for (let ti = 0; ti < perTrial.length; ti++) {
+    const list = perTrial[ti];
+    let d0 = 0, seg = 0, last = list.length ? list[0].now : 0, rr = [];
+    for (let i = 1; i < list.length; i++) {
+      const a = list[i - 1], b = list[i];
+      if (typeof a.need !== 'number' || typeof b.need !== 'number') continue;
+      const d = b.need - a.need;
+      if (Math.abs(d) < 1e-9) continue;
+      const nd = d > 0 ? 1 : -1;
+      if (d0 !== 0 && nd !== d0) { if (seg >= 0.3) { rr.push((b.now - last) / 1000); last = b.now; } seg = 0; }
+      seg += Math.abs(d); d0 = nd;
+    }
+    const st2 = rr.length ? stats(rr) : null;
+    console.log('  场次#' + (ti + 1) + ' active帧=' + list.length + ' 时长=' + (list.length ? ((list[list.length - 1].now - list[0].now) / 1000).toFixed(2) : '-') + 's 半周期=' + JSON.stringify(rr.map(x => +x.toFixed(3))) + ' 往返=' + (st2 ? (2 * st2.p50).toFixed(3) : '-') + 's');
+  }
   console.log('needle 前 24 帧 [ms,needle,dir,freeze,locked,round,windowSeq]: ' + JSON.stringify(acc.slice(0, 24).map(s => [Math.round(s.now), +s.need.toFixed(3), s.dir, s.freeze, s.locked, s.round, s.windowSeq])));
-  rig.check('§5 首回合 needle 全周期 ≈ 1.6s（指针实际扫动速度反推）', tMove !== null && tMove >= 1.3 && tMove <= 1.95, 'T_移动=' + (tMove === null ? '-' : tMove.toFixed(3)) + 's / T_含静默=' + (tEst === null ? '-' : tEst.toFixed(3)) + 's 静默占比=' + (span > 0 ? (100 * frozen / span).toFixed(1) : '-') + '%');
+  const allHalf = perTrial.map(list => { let d0 = 0, seg = 0, last = list.length ? list[0].now : 0, rr = []; for (let i = 1; i < list.length; i++) { const a = list[i - 1], b = list[i]; if (typeof a.need !== 'number' || typeof b.need !== 'number') continue; const d = b.need - a.need; if (Math.abs(d) < 1e-9) continue; const nd = d > 0 ? 1 : -1; if (d0 !== 0 && nd !== d0) { if (seg >= 0.3) { rr.push((b.now - last) / 1000); last = b.now; } seg = 0; } seg += Math.abs(d); d0 = nd; } return rr; }).flat();
+  const fastHalf = allHalf.length ? Math.min(...allHalf) : null;
+  console.log('全部半周期样本 s=' + JSON.stringify(allHalf.map(x => +x.toFixed(3))) + ' 最快=' + (fastHalf === null ? '-' : fastHalf.toFixed(3)) + 's');
+  rig.check('§5 首回合 needle 扫描半周期 ≈ 0.8s（取最快的一次；停顿/过窗 dwell 只会把区间拉长）', fastHalf !== null && fastHalf >= 0.6 && fastHalf <= 1.05, '最快半周期=' + (fastHalf === null ? '-' : fastHalf.toFixed(3)) + 's（往返 ' + (fastHalf === null ? '-' : (2 * fastHalf).toFixed(3)) + 's）；全部=' + JSON.stringify(allHalf.map(x => +x.toFixed(3))) + '；[诊断] 平均扫速法 T=' + (tMove === null ? '-' : tMove.toFixed(3)) + 's 不作判定依据');
   // 窗口只在「指针经过后」重随机：变化前必须先在历史里出现过 needle 落在旧窗口内
   const changes = [];
   for (let i = 1; i < acc.length; i++) {

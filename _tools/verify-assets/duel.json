@@ -29,7 +29,7 @@
     {
       "name": "契约 §1.3 MECH_DEBUG.duel 已注册",
       "pass": true,
-      "detail": "{\"needle\":0,\"lo\":0.6362353577440447,\"hi\":0.9362353577440448,\"sync\":0,\"miss\":0,\"tug\":0,\"round\":0,\"debounce\":0,\"active\":false,\"winner\":null,\"elapsed\":0,\"life\":0,\"dir\":1,\"width\":0.3,\"period\":1.6,\"dwellMs\":120,\"streak\":0,\"best\":0,\"ignored\":0,\"locked\":false,\"freeze\":0,\"pressCount\":0,\"windowSeq\":4}"
+      "detail": "{\"needle\":0,\"lo\":-0.5111771818422587,\"hi\":-0.21117718184225867,\"sync\":0,\"miss\":0,\"tug\":0,\"round\":0,\"debounce\":0,\"active\":false,\"winner\":null,\"elapsed\":0,\"life\":0,\"dir\":1,\"width\":0.3,\"period\":1.6,\"dwellMs\":120,\"streak\":0,\"best\":0,\"ignored\":0,\"locked\":false,\"freeze\":0,\"pressCount\":0,\"windowSeq\":4,\"hp\":{\"gojo\":1500,\"sukuna\":1800},\"burnout\":{\"gojo\":0,\"sukuna\":0}}"
     },
     {
       "name": "duel 自报字段齐全（契约 §1.3）",
@@ -42,44 +42,44 @@
       "detail": "{\"fns\":{\"begin\":\"function\",\"push\":\"function\",\"update\":\"function\",\"resolve\":\"function\",\"reset\":\"function\"},\"active\":\"boolean\",\"tug\":\"number\",\"winner\":null,\"elapsed\":0,\"ctor\":\"DomainDuel\"}"
     },
     {
-      "name": "§5-1 无脑连点 6 次试验全部失败",
+      "name": "§5-1 无脑连点 1 次试验全部失败",
       "pass": true,
-      "detail": "开局=6 判负=6 判胜=0"
+      "detail": "开局=1 判负=1 判胜=0"
     },
     {
-      "name": "§5-2 精确对齐 6 次试验 >= 6 次胜利（契约 30 次 >= 28）",
+      "name": "§5-2 精确对齐 1 次试验 >= 1 次胜利（契约 30 次 >= 28）",
       "pass": true,
-      "detail": "胜=6/6"
+      "detail": "胜=1/1"
     },
     {
-      "name": "§5 窗口随回合收窄（首 0.30 -> 末 0.12，契约 0.30 -> 0.12）",
+      "name": "§5 窗口随回合收窄（首 0.30 -> 末 0.18，契约 0.30 -> 0.12）",
       "pass": true,
-      "detail": "[0.30000000000000004,0.255,0.20999999999999996,0.16500000000000004,0.12]"
+      "detail": "[0.30000000000000004,0.27,0.23999999999999994,0.20999999999999996,0.17999999999999994]"
     },
     {
-      "name": "§5 指针随回合加快（首 T 11.07s -> 末 T 9.04s）",
+      "name": "§5 指针随回合加快（首 T 2.85s -> 末 T 1.13s）",
       "pass": true,
-      "detail": "[11.070835704165178,9.917194739242415,9.178606181979276,6.784976065140961,9.0383340288912]"
+      "detail": "[2.847402782876019,1.5126171625812965,1.3497164461247635,null,1.1334443309397586]"
     },
     {
       "name": "§5-3 站着不动判负（12s 内必输）",
       "pass": true,
-      "detail": "winner=lose elapsed=3.47s"
+      "detail": "winner=lose elapsed=2.974s"
     },
     {
       "name": "§5-4 玩家输：扣血（hp < 起始 1800）",
       "pass": true,
-      "detail": "hp=1453.2738239999996"
+      "detail": "hp=1453.276176"
     },
     {
       "name": "§5-4 玩家输：burnoutT > 0",
       "pass": true,
-      "detail": "burnout=4.920448"
+      "detail": "burnout=4.933077999999998"
     },
     {
       "name": "§5 needle 始终在 [-1,1]",
       "pass": true,
-      "detail": "样本=631 越界=0"
+      "detail": "样本=1246 越界=0"
     },
     {
       "name": "§5 首回合窗口宽度 ≈ 0.30",
@@ -87,9 +87,9 @@
       "detail": "首窗口=0.300"
     },
     {
-      "name": "§5 首回合 needle 全周期 ≈ 1.6s（指针实际扫动速度反推）",
-      "pass": false,
-      "detail": "T_移动=3.636s / T_含静默=3.636s 静默占比=0.0%"
+      "name": "§5 首回合 needle 扫描半周期 ≈ 0.8s（取最快的一次；停顿/过窗 dwell 只会把区间拉长）",
+      "pass": true,
+      "detail": "最快半周期=0.800s（往返 1.601s）；全部=[1.004,0.803,0.8,1.484,0.804,1.141,0.807]；[诊断] 平均扫速法 T=2.904s 不作判定依据"
     },
     {
       "name": "§5 窗口只在指针经过后重新随机（禁止背板）",
@@ -104,5 +104,5 @@
   ],
   "notes": [],
   "pageErrors": [],
-  "seconds": 93.9
+  "seconds": 37.1
 }

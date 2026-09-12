@@ -284,7 +284,8 @@ const PAGE = String.raw`window.__BF = (function () {
       overlaps.push({ who: String(o.id || o.className || o.tagName).slice(0, 40), area: Math.round(ox * oy) });
     }
     // 五个采样点都必须落在按钮自己身上（比矩形相交更严格）
-    var pts = [[r.left + 5, r.top + 5], [r.right - 5, r.top + 5], [r.left + 5, r.bottom - 5], [r.right - 5, r.bottom - 5], [cx, cy]];
+    var dx = r.width * 0.28, dy = r.height * 0.28;   // 圆形按钮：采样点落在圆内，不能取外接矩形四角
+    var pts = [[cx, cy], [cx - dx, cy], [cx + dx, cy], [cx, cy - dy], [cx, cy + dy]];
     var hitAll = true;
     for (var k = 0; k < pts.length; k++) {
       var t2 = document.elementFromPoint(pts[k][0], pts[k][1]);
@@ -322,21 +323,42 @@ const PAGE = String.raw`window.__BF = (function () {
       var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
       var el = document.elementFromPoint(cx, cy) || btn;      // 命中测试：真正点到的是谁
       window.__INJECT.press("KeyJ"); window.__INJECT.release("KeyJ");
-      var start = a.frame, downAt = -1, upAt = -1;
+      var start = a.frame, downAt = -1, upAt = -1, hitAt = -1;
+      var ringInit = -1, ringAt = -1, pressedAtScale = -1;
+      /**
+       * 按下时机 = 玩家真正看得见的线索：**收缩环缩到 25%**（等价于人眼看环闭合去按 V）。
+       * 不写死帧号 —— 环与出招共用同一个 dt，慢镜头/顿帧下自动同步，
+       * 这也正是「可读性」这条需求要证明的东西。
+       */
+      var prev = -1, rate = 0;
       function loop() {
         var cur = a.frame;
-        if (downAt < 0 && cur >= start + spec.lead - 1) {
+        var rr = visuals().rings, s = -1;
+        for (var q = 0; q < rr.length; q++) if (rr[q].vis && rr[q].s > s) s = rr[q].s;
+        if (s > 0) {
+          if (ringInit < 0) { ringInit = s; prev = s; }
+          // 每帧实际收缩量（真实帧）——慢镜头下它自动变小，于是「剩余帧数」估算自动跟随
+          if (prev > 0 && s < prev) rate = Math.max(rate, prev - s);
+          prev = s;
+        }
+        var etaFrames = (rate > 0 && s > 0) ? (s / rate) : 999;   // 环还有几帧闭合
+        var ready = (ringInit > 0 && rate > 0 && etaFrames <= 1.2);
+        if (downAt < 0 && (ready || cur >= start + spec.lead + 6)) {
+          pressedAtScale = ringInit > 0 ? Math.round(ringAt / ringInit * 100) : -1;
           el.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, cancelable: true }));
           downAt = cur;
-        } else if (downAt > 0 && upAt < 0 && cur >= downAt + 1) {
+        } else if (downAt > 0 && upAt < 0 && cur >= downAt + 2) {
           el.dispatchEvent(new TouchEvent("touchend", { bubbles: true, cancelable: true }));
           upAt = cur;
         }
-        if (cur >= start + spec.lead + 16) {
+        if (hitAt < 0 && mech().hits > h0) hitAt = cur;
+        if ((hitAt > 0 && cur >= hitAt + 10) || cur >= start + 260) {
           var m1 = mech();
           res({ lead: spec.lead, startFrame: start, downAt: downAt, upAt: upAt, hitFrame: m1.F,
             delta: m1.delta, ok: m1.ok, bf: m1.bf - m0.bf, presses: m1.presses - m0.presses,
             mashes: m1.mashes - m0.mashes, legit: m1.legit - m0.legit, win: m1.win, ce: m1.ce,
+            ringInit: Math.round(ringInit * 1000) / 1000, pressedAtRingPct: pressedAtScale,
+            ringRate: Math.round(rate * 100000) / 100000,
             statsBF: window.__SS.stats.blackFlash, hitViaButton: el === btn });
           return;
         }
@@ -576,15 +598,15 @@ async function run() {
   const cal = await b.evaluate('window.__BF.calibrateLead()');
   log('  实时标定（真实按 J 起手到命中）: ' + J(cal));
   const tries = [];
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 4; i++) {
     if (i > 0) await sleep(3600);                 // 等满 3.2s 黑闪冷却
-    const tr = await b.evaluate('window.__BF.touchSync(' + J({ lead: cal.lead }) + ')');
+    const tr = await b.evaluate('window.__BF.touchSync(' + J({ lead: cal.lead, at: 0.25 }) + ')');
     tries.push(tr);
     log('  第 ' + (i + 1) + ' 次触屏同步: ' + J(tr));
   }
   const touchOk = tries.filter((t) => t.ok === true).length;
   results.data.touchSync = { cal: cal, tries: tries, success: touchOk };
-  ok('「咒」按钮（真实 TouchEvent + elementFromPoint）能打出黑闪', touchOk >= 1, touchOk + '/3');
+  ok('「咒」按钮（真实 TouchEvent + elementFromPoint）能打出黑闪', touchOk >= 2, touchOk + '/4（按下时机 = 看收缩环缩到 25%，不写死帧号；慢镜头下自动跟随）');
   ok('触屏黑闪计入 stats.blackFlash（沿用既有统计）', tries.some((t) => t.statsBF > 0), 'stats.blackFlash=' + tries.map((t) => t.statsBF).join('/'));
   await shot('05-touch-844x390');
 

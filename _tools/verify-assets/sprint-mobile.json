@@ -1,0 +1,83 @@
+{
+  "name": "sprint-mobile",
+  "file": "tmp/sprint/dist.html",
+  "url": "file:///C%3A/Users/Administrator/Desktop/dsh/%E6%96%B0%E5%AE%BF%E5%AF%B9%E5%86%B3/tmp/sprint/dist.html",
+  "mobile": true,
+  "viewport": [
+    844,
+    390
+  ],
+  "boot": {
+    "state": "fight",
+    "hasSS": true,
+    "quality": "low",
+    "keys": "state,snap,cam,scene,godCam,activeCamera,combat,fx,weapons,audio,city,render,cutscene,gojo,sukuna,quality,stats,mahoraga,blackFlash,hooks,mech,duel",
+    "isTouch": true,
+    "hasInject": true,
+    "hasTouch": true,
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "w": 844,
+    "h": 390,
+    "tap": "getSnapshot"
+  },
+  "results": [
+    {
+      "name": "产物可启动并进入 fight",
+      "pass": true,
+      "detail": "state=fight"
+    },
+    {
+      "name": "无页面错误",
+      "pass": true,
+      "detail": "[]"
+    },
+    {
+      "name": "契约 §1.3 MECH_DEBUG.sprint 已注册",
+      "pass": true,
+      "detail": "{\"speed\":4.8,\"target\":4.8,\"phase\":\"walk\",\"fov\":0,\"accelPhase\":\"idle\",\"dust\":0,\"fovAbs\":46,\"spdNow\":0,\"wind\":0,\"blur\":0,\"steps\":0,\"anim\":\"idle\"}"
+    },
+    {
+      "name": "sprint 自报字段齐全（契约 §1.3）",
+      "pass": true,
+      "detail": "缺 []"
+    },
+    {
+      "name": "§7 手机摇杆推到底触发疾跑（v >= 9.5）",
+      "pass": true,
+      "detail": "v=10.735"
+    },
+    {
+      "name": "§7 手机 phase=sprint",
+      "pass": true,
+      "detail": "phases=[\"walk\",\"run\",\"sprint\"]"
+    },
+    {
+      "name": "§7 __TOUCH.run 标志被补上",
+      "pass": true,
+      "detail": "run 采样值=[false,true]"
+    },
+    {
+      "name": "§7 边界 0.90（未过 0.92）不疾跑",
+      "pass": false,
+      "detail": "phase 集合=[\"sprint\",\"run\",\"walk\"]"
+    },
+    {
+      "name": "§7 边界 0.95（过了 0.92）触发疾跑",
+      "pass": true,
+      "detail": "v=1.456"
+    },
+    {
+      "name": "手机 摇杆回中不位移",
+      "pass": true,
+      "detail": "位移=0.214m"
+    },
+    {
+      "name": "全流程无页面错误",
+      "pass": true,
+      "detail": "[]"
+    }
+  ],
+  "notes": [],
+  "pageErrors": [],
+  "seconds": 13.7
+}

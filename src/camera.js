@@ -709,6 +709,23 @@ function updateGodCam(dt, snap) {
     baseYaw = cam.yaw;
   }
 
+  /**
+   * ---- 3.5 机制模块的取景覆盖（HOOKS.camFrame）----
+   * 上帝机位是"俯视交战点"的设计：把玩家正上方投影到 NDC，y=6 就到画面上沿（y=7 出画），
+   * 也就是**地面上方 6.2m 以上在正常战斗里必然看不见** —— 悬浮在半空的魔虚罗（4.2m 高）
+   * 无论怎么放都会有一半出画（Lead 截图证据：HUD 上它在掉血，画面里一个像素都没有）。
+   * 这里给机制模块一个"取景覆盖"点：把机位拉远（frac 变小）+ 压低俯角（pitch 变小），
+   * 必要时抬高注视点。没有模块注册时 firstHook 返回 undefined，**逐帧行为与改前完全一致**。
+   * ⚠ 只改 fracT / wantPitch / wantY 这三个"意图量"，不写 cam.pitch —— cam.pitch 由下面
+   *   第 5 步平滑逼近，直接写它会被 camUserHold 判成"玩家接管镜头"而抢走控制权。
+   */
+  const camOv = firstHook("camFrame", snap, { frac: fracT, pitch: wantPitch });
+  if (camOv) {
+    if (typeof camOv.frac === "number" && isFinite(camOv.frac)) fracT = camOv.frac;
+    if (typeof camOv.pitch === "number" && isFinite(camOv.pitch)) wantPitch = camOv.pitch;
+    if (typeof camOv.lookH === "number" && isFinite(camOv.lookH)) wantY = py + camOv.lookH;
+  }
+
   // ---- 4. 自动回正：只在偏得离谱时慢慢转，且玩家刚操作过就不抢 ----
   if (state !== "title" && state !== "victory" && state !== "defeat" && state !== "paused" && camUserHold <= 0 && !(snap && snap.clashActive)) {
     let diff = angDelta(baseYaw, cam.yaw);
@@ -747,7 +764,8 @@ function updateGodCam(dt, snap) {
    * 窄画幅（竖屏）下把"占屏下限"放宽到 0.165 左右：宁可人小一点，也不能让对手整个丢出画面。
    * 宽屏时 camNarrow=0，行为与之前逐帧一致。
    */
-  const fracMin = CAM_FRAC_MIN * (1 - 0.25 * camNarrow);
+  // fracMin 是"占屏下限"：它也交给 camFrame 放宽（distCeil 由它算出，所以放宽后能拉得更远）
+  const fracMin = CAM_FRAC_MIN * (1 - 0.25 * camNarrow) * (camOv && camOv.fracMin ? camOv.fracMin : 1);
   let distTarget = camDistForFrac(fracT, camFovBase) * camShotDistMul() * camFracFix * cam.zoomBias;
   const distCeil = camDistForFrac(fracMin, camFovBase);
   const distFloor = camDistForFrac(CAM_FRAC_MAX, camFovBase);
@@ -954,6 +972,10 @@ function updateGodCam(dt, snap) {
   M.sprintFov = Math.round(camSprintFov * 100) / 100;
   M.sprintDist = typeof Sprint !== "undefined" && Sprint && Sprint.distMul ? Math.round(Sprint.distMul() * 1000) / 1000 : 1;
   M.sprintRoll = Math.round(camSprintRoll * 1000) / 1000;
+  M.camFrame = camOv ? { frac: camOv.frac, pitch: camOv.pitch, lookH: camOv.lookH, fracMin: camOv.fracMin } : null;
+  M.fracT = Math.round(fracT * 1000) / 1000;
+  M.wantPitch = Math.round(wantPitch * 1000) / 1000;
+  M.wantY = Math.round(wantY * 100) / 100;
 
   camPrevYaw = cam.yaw;
   camPrevPitch = cam.pitch;

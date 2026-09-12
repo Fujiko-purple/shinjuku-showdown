@@ -510,7 +510,20 @@ var MOBILE = (function () {
     T.mz = stick.mz;
     T.camX = 0;   // 镜头旋转由本模块直接写 cam.yaw/pitch，手感更跟手
     T.camY = 0;
-    setStickRun(T.on && Math.hypot(T.mx, T.mz) > 0.92);
+    deriveRunFromBridge();
+  }
+  /**
+   * 疾跑判定**每帧从桥派生**，而不是只在 syncBridge 里算一次。
+   *
+   * 原因（verifier 实测踩到）：window.__TOUCH 是公开的模拟量桥，除了本模块，
+   * __MOBILE.drive() 与验收脚本也会**直接写** T.mx / T.mz —— 那条路径不经过
+   * moveStick()/syncBridge()，于是"摇杆到底"的判定永远不会发生：
+   * 角色以走路速度前进（4.9 m/s，位移正常），但 run 标志一直 false、phase 永远 walk。
+   * 把判定挂到每帧的 rAF 上之后，无论谁写桥（真手指 / drive() / 直接改字段），
+   * 下一帧就会被派生出同样的疾跑，桥与派生量不可能再失配。
+   */
+  function deriveRunFromBridge() {
+    setStickRun(!!T.on && Math.hypot(+(T.mx || 0), +(T.mz || 0)) > 0.92);
     T.run = stickRun;
   }
 
@@ -1107,6 +1120,8 @@ var MOBILE = (function () {
     lastNow = now;
     if (dt > 0.5) dt = 0.5;      // 切后台回来别把统计带歪
     try { prewarmTick(); } catch (e) { if (DEBUG) console.error("[mobile] prewarm", e); }
+    // 疾跑派生必须每帧跑，且不依赖 isTouch/DOM —— 验收脚本的桌面模拟也走这条路
+    try { deriveRunFromBridge(); } catch (e) { dbg.lastErr = String(e); }
     if (!isTouch || !host) return;
     try { syncUI(dt); } catch (e) { dbg.lastErr = String(e && (e.stack || e.message) || e); if (DEBUG) console.error("[mobile] syncUI", e); }
   }

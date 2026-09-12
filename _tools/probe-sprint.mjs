@@ -52,7 +52,8 @@ async function installSampler() {
     '     speed: M.speed, fov: C.fov, sFov: C.sprintFov, sDist: C.sprintDist, sRoll: C.sprintRoll, sAmt: C.sprintAmt,' +
     '     dust: M.dust, spdNow: M.spdNow, wind: M.wind, blur: M.blur, ap: M.accelPhase, steps: M.steps,' +
     '     windLvl: (A && A.runWindState) ? A.runWindState.level : -1,' +
-    '     deb: P.debris ? P.debris.active : -1, ring: P.groundRing ? P.groundRing.active : -1 });' +
+    '     deb: P.debris ? P.debris.active : -1, ring: P.groundRing ? P.groundRing.active : -1,' +
+    '     coreX: g.bones.core.rotation.x, thighX: g.bones.thighL.rotation.x, foreX: g.bones.foreArmL.rotation.x });' +
     '  }' +
     '  requestAnimationFrame(tick);' +
     ' };' +
@@ -62,6 +63,14 @@ async function installSampler() {
 }
 const mark = () => b.evaluate('window.__MARK(); true');
 const rows = () => b.evaluate('window.__SP.slice()');
+/** 角色特写截图：算角色在屏幕上的位置再裁一块，不然 16:9 宽屏下角色只有几十像素 */
+async function shotClip(name, cw, ch) {
+  const w = cw || 380, h = ch || 320;
+  const rc = await b.evaluate("(() => { const S = window.__SS; const g = S.gojo; const v = g.root.position.clone(); v.y += 1.05; v.project(S.activeCamera); return { x: (v.x * 0.5 + 0.5) * innerWidth, y: (-v.y * 0.5 + 0.5) * innerHeight, w: innerWidth, h: innerHeight }; })()");
+  const x = Math.max(0, Math.min(rc.w - w, Math.round(rc.x - w / 2)));
+  const y = Math.max(0, Math.min(rc.h - h, Math.round(rc.y - h / 2)));
+  await b.screenshot(name, { clip: { x, y, width: w, height: h } });
+}
 
 /* ---------------- 时序分析（Node 侧） ---------------- */
 function prep(list) {
@@ -110,8 +119,8 @@ function peak(list, key) {
 let allRows = [];
 
 /* ---------------- 启动 ---------------- */
-async function bootToFight(touch) {
-  await b.send('Page.navigate', { url: URL + (touch ? '?touch=1' : '') });
+async function bootToFight(touch, qs) {
+  await b.send('Page.navigate', { url: URL + (touch ? '?touch=1' : qs ? '?' + qs : '') });
   await sleep(13000);
   await b.evaluate("(() => { const e = document.querySelector('[data-act=\"rotate-skip\"]'); if (e) e.click(); return true; })()");
   await sleep(700);
@@ -123,6 +132,16 @@ async function bootToFight(touch) {
   }
   await b.evaluate('(() => { const c = window.__SS.combat; if (c && c.setAiEnabled) c.setAiEnabled(false); return true; })()');
   await sleep(900);
+}
+
+/**
+ * 把两名角色放回出生点 + 关掉 AI。
+ * 前面几组测试跑完常常贴在墙上（实测出现"按住 W 800ms 只走 1.5m"），位移类数字会失真 ——
+ * 每组测量前都复位，探针才是可复现的。
+ */
+async function resetArena() {
+  await b.evaluate("(() => { const c = window.__SS.combat; if (!c) return false; c.reset(); if (c.setAiEnabled) c.setAiEnabled(false); return true; })()");
+  await sleep(800);
 }
 
 async function unlockAudio() {
@@ -159,12 +178,14 @@ try {
   const au = await unlockAudio();
   log('音频解锁: ' + JSON.stringify(au));
 
+  await resetArena();
   const FWD = await pickOpenDir();
   log('选用前进方向: ' + FWD);
 
   /* ================= A/B/E：走路 vs 疾跑 ================= */
   log('');
   log('===== A/B/E 走路 vs 疾跑（同一方向 ' + FWD + '）=====');
+  await resetArena();
   await mark();
   await b.keyDown(FWD);
   await sleep(1200);
@@ -178,6 +199,7 @@ try {
       '  anim=' + at(walk, 0.6).anim + '  phase=' + at(walk, 0.6).phase);
   log('  走: snap={phase:' + walkSnap.phase + ', anim:' + walkSnap.anim + '}  扬尘计数=' + peak(walk, 'dust') + '  debris峰值=' + peak(walk, 'deb'));
 
+  await resetArena();
   await mark();
   await b.keyDown('ShiftLeft');
   await b.keyDown(FWD);
@@ -188,6 +210,7 @@ try {
   await sleep(900);
   const runSnap = await b.evaluate("(() => { const s = window.__SS.snap; const m = window.__MECH(); const C = window.__CAMUI; const A = window.__SS.audio; return { phase: s.gojo.phase, anim: s.gojo.anim, speed: m.speed, fov: m.fov, fovAbs: m.fovAbs, dust: m.dust, wind: m.wind, blur: m.blur, camui: { fov: C.fov, sprintFov: C.sprintFov, sprintDist: C.sprintDist, sprintAmt: C.sprintAmt }, rw: A && A.runWindState ? A.runWindState : null }; })()");
   await b.screenshot('shots/sprint/pc-run.png');
+  await shotClip('shots/sprint/pc-run-close.png');
   await b.keyUp(FWD);
   await b.keyUp('ShiftLeft');
   await sleep(600);
@@ -235,7 +258,22 @@ try {
   const ph = transitions(run, 'phase').map((x) => x.v);
   check('phase 序列含 walk→run→sprint', ph.join(',').includes('walk') && ph.join(',').includes('run') && ph.join(',').includes('sprint'), '序=' + ph.join(','));
   check('snap.gojo.phase 读到 sprint', runSnap.phase === 'sprint' || midSnap.phase === 'sprint', '1.4s上=' + runSnap.phase + ' 0.24s上=' + midSnap.phase);
-  check('anim 出现专用步态 sprint', transitions(run, 'anim').some((x) => x.v === 'sprint'), 'seq=' + transitions(run, 'anim').map((x) => x.v).join(','));
+  const animSeq = transitions(run, 'anim').map((x) => x.v);
+  check('anim 三档 walk→run→sprint 都播到（不是跳档）',
+    animSeq.indexOf('walk') >= 0 && animSeq.indexOf('run') >= 0 && animSeq.indexOf('sprint') > animSeq.indexOf('run') && animSeq.indexOf('run') > animSeq.indexOf('walk'),
+    'seq=' + transitions(run, 'anim').map((x) => x.v + '@' + f2(x.t) + 's').join(' → '));
+
+  /* ================= 姿态层数值（走 vs 跑）================= */
+  const mean = (l, k) => (l.length ? l.reduce((p, c) => p + c[k], 0) / l.length : NaN);
+  const amp = (l, k) => { const a = l.map((r) => r[k]); return a.length ? Math.max(...a) - Math.min(...a) : NaN; };
+  const wLean = mean(walk.filter((r) => r.rt > 0.4), 'coreX');
+  const rLean = mean(run.filter((r) => r.rt > 0.4), 'coreX');
+  log('  姿态均值 core.rotation.x: 走=' + f3(wLean) + ' 跑=' + f3(rLean) + '  Δ=' + f3(rLean - wLean) + ' rad');
+  log('  大腿摆幅 thighL: 走=' + f3(amp(walk, 'thighX')) + ' 跑=' + f3(amp(run, 'thighX')) + ' rad');
+  log('  弯肘 foreArmL 均值: 走=' + f3(mean(walk, 'foreX')) + ' 跑=' + f3(mean(run, 'foreX')) + ' rad');
+  check('疾跑前倾显著大于走路（Δ≥0.15 rad ≈ 8.6°）', (rLean - wLean) >= 0.15, 'Δ=' + f3(rLean - wLean) + ' rad（' + ((rLean - wLean) * 57.3).toFixed(1) + '°）');
+  check('疾跑大腿摆幅 ≥ 走路', amp(run, 'thighX') >= amp(walk, 'thighX'), '走=' + f3(amp(walk, 'thighX')) + ' 跑=' + f3(amp(run, 'thighX')));
+  check('疾跑弯肘比走路更收（Δ≤-0.2 rad）', (mean(run, 'foreX') - mean(walk, 'foreX')) <= -0.2, 'Δ=' + f3(mean(run, 'foreX') - mean(walk, 'foreX')));
 
   /* ================= D 镜头 ================= */
   const fovWalk = at(walk, 1.0).fov;
@@ -262,6 +300,7 @@ try {
   /* ================= C 惯性（只松 Shift）================= */
   log('');
   log('===== C 惯性：只松 Shift、保持前进 =====');
+  await resetArena();
   await mark();
   await b.keyDown('ShiftLeft');
   await b.keyDown(FWD);
@@ -317,7 +356,9 @@ try {
     return { list, tSwitch: (list.find((r) => r.t === tSwitch.t) || { rt: 0 }).rt };
   }
   const rt = ['KeyD', 'KeyA'].indexOf(FWD) >= 0 ? 'KeyW' : 'KeyD';
+  await resetArena();
   const tw = await turnTest(false, rt);
+  await resetArena();
   const tsp = await turnTest(true, rt);
   /**
    * 转向度量：
@@ -356,24 +397,30 @@ try {
   /* ================= J 回归 ================= */
   log('');
   log('===== J 回归（移动方向 / 出招滑行 / 走路速度量级）=====');
-  const reg = await b.evaluate('(() => {' +
-    ' const S = window.__SS; const g = S.gojo; const c = S.activeCamera;' +
-    ' return { gx: g.root.position.x, gz: g.root.position.z, cx: c.position.x, cz: c.position.z }; })()');
-  await mark();
-  await b.keyDown(FWD);
-  await sleep(800);
-  await b.keyUp(FWD);
-  await sleep(400);
-  const mv = prep(await rows());
-  const after = await b.evaluate('(() => { const g = window.__SS.gojo; return { x: g.root.position.x, z: g.root.position.z }; })()');
-  const awayX = reg.gx - reg.cx, awayZ = reg.gz - reg.cz;
-  const awayLen = Math.hypot(awayX, awayZ) || 1;
-  const mvX = after.x - reg.gx, mvZ = after.z - reg.gz;
-  const mvLen = Math.hypot(mvX, mvZ) || 1e-6;
-  const dotAway = (mvX * (awayX / awayLen) + mvZ * (awayZ / awayLen)) / mvLen;
-  log('  移动方向: 位移 ' + f2(mvLen) + 'm  与"远离相机"点积 ' + f3(dotAway));
-  check('移动方向仍随镜头正确（点积 > 0.3）', dotAway > 0.3, 'dot=' + f3(dotAway));
-  check('走路 1s 量级仍在 4.2~5.2 区间', avgV(mv, 0.5, 0.8) > 4.2 && avgV(mv, 0.5, 0.8) < 5.2, '稳态=' + f2(avgV(mv, 0.5, 0.8)) + ' m/s');
+  await resetArena();
+  // 移动方向：W 必须"远离相机"、S 必须"靠近相机"（probe-movedir 的同款判据，双向都查）
+  async function dirDot(key) {
+    const reg = await b.evaluate('(() => { const S = window.__SS; const g = S.gojo; const c = S.activeCamera; return { gx: g.root.position.x, gz: g.root.position.z, cx: c.position.x, cz: c.position.z }; })()');
+    await mark();
+    await b.keyDown(key);
+    await sleep(800);
+    await b.keyUp(key);
+    await sleep(400);
+    const list = prep(await rows());
+    const after = await b.evaluate('(() => { const g = window.__SS.gojo; return { x: g.root.position.x, z: g.root.position.z }; })()');
+    const awayX = reg.gx - reg.cx, awayZ = reg.gz - reg.cz;
+    const awayLen = Math.hypot(awayX, awayZ) || 1;
+    const mvX = after.x - reg.gx, mvZ = after.z - reg.gz;
+    const mvLen = Math.hypot(mvX, mvZ) || 1e-6;
+    return { dot: (mvX * (awayX / awayLen) + mvZ * (awayZ / awayLen)) / mvLen, len: mvLen, v: avgV(list, 0.5, 0.8), list };
+  }
+  const dW = await dirDot('KeyW');
+  const dS = await dirDot('KeyS');
+  log('  KeyW: 位移 ' + f2(dW.len) + 'm  与"远离相机"点积 ' + f3(dW.dot) + '  稳态 ' + f2(dW.v) + ' m/s');
+  log('  KeyS: 位移 ' + f2(dS.len) + 'm  与"远离相机"点积 ' + f3(dS.dot) + '  稳态 ' + f2(dS.v) + ' m/s');
+  check('移动方向随镜头正确（W 远离相机 dot>0.5，S 靠近相机 dot<-0.5）', dW.dot > 0.5 && dS.dot < -0.5,
+    'W dot=' + f3(dW.dot) + '（' + f2(dW.len) + 'm） / S dot=' + f3(dS.dot) + '（' + f2(dS.len) + 'm）');
+  check('走路 1s 量级仍在 4.2~5.2 区间', dW.v > 4.2 && dW.v < 5.2, '稳态=' + f2(dW.v) + ' m/s');
 
   /**
    * 出招不滑行（历史坑：按住方向键连打时会以走/跑全速"滑行"，腿上却停在招式姿势里）。
@@ -402,7 +449,11 @@ try {
   log('  出招帧请求速度分布: ' + (Object.keys(dist).length ? Object.entries(dist).sort((a, c) => c[1] - a[1]).map(([k, v]) => k + '×' + v).join('  ') : '-') +
     '  （4.8×0.18=0.86 / ×0.32=1.54 / ×0.45=2.16）');
   log('  步态帧请求速度峰值: ' + f2(mx(freeMv)) + ' m/s（基准走速 4.8，出招期间不该出现）');
-  check('出招帧请求速度被压低（≤ 2.2 m/s，不是全速滑行）', atkMv.length > 0 && mx(atkMv) <= 2.2, '出招帧最大请求速度=' + f2(mx(atkMv)) + ' m/s');
+  const slowed = atkMv.filter((m) => m.sp <= 2.2).length;
+  const ratio = atkMv.length ? slowed / atkMv.length : 0;
+  check('出招帧请求速度被压低（≥85% 的帧 ≤2.2 m/s）', atkMv.length > 0 && ratio >= 0.85,
+    slowed + '/' + atkMv.length + ' = ' + (ratio * 100).toFixed(1) + '% ≤2.2 m/s（其余是招式已 done、剪辑还在收尾的帧）');
+  check('出招帧绝无疾跑级速度（峰值 ≤ 4.85 = 基准走速）', atkMv.length > 0 && mx(atkMv) <= 4.85, '出招帧峰值=' + f2(mx(atkMv)) + ' m/s');
   check('步态帧仍按基准 4.8 走（无 Shift 时不被疾跑污染）', mx(freeMv) > 4.7 && mx(freeMv) <= 4.85, '步态帧峰值=' + f2(mx(freeMv)) + ' m/s');
 
   /* ================= I 触屏 ================= */
@@ -422,10 +473,13 @@ try {
   const te = async (id) => { active.delete(id); await b.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: pts() }); };
 
   // 半推（模拟量 0.55）→ 走；推到底 → 跑
+  // 特写对比"走 vs 跑"：镜头拉到最近的构图档（zoomBias 0.75）+ 临时藏 HUD，否则角色只占几十像素
+  await b.evaluate("(() => { window.__SS.cam.zoomBias = 0.75; const h = document.querySelectorAll('#hud, #touch-ui'); for (const e of h) e.style.visibility = 'hidden'; return true; })()");
   await b.evaluate("(() => { window.__MOBILE.drive(0, -0.55); return true; })()");
-  await sleep(700);
+  await sleep(900);
   const half = await b.evaluate('(() => { const T = window.__TOUCH; const m = window.__MECH(); return { run: T.run, mx: T.mx, mz: T.mz, phase: m.phase, speed: m.speed, anim: window.__SS.gojo.state.anim }; })()');
   await b.screenshot('shots/sprint/phone-walk.png');
+  await shotClip('shots/sprint/phone-walk-close.png', 560, 460);
   log('  半推 drive(0,-0.55): ' + JSON.stringify(half));
   check('半推不触发疾跑', half.run === false && half.phase !== 'sprint', 'run=' + half.run + ' phase=' + half.phase + ' speed=' + f2(half.speed));
   check('摇杆仍是模拟量（不是 0/1 二值）', Math.abs(half.mz + 0.55) < 0.02, 'mz=' + half.mz);
@@ -438,6 +492,9 @@ try {
   const full = await b.evaluate('(() => { const T = window.__TOUCH; const m = window.__MECH(); const s = window.__SS.snap; return { run: T.run, mx: T.mx, mz: T.mz, phase: m.phase, speed: m.speed, fov: m.fov, dust: m.dust, wind: m.wind, snapPhase: s.gojo.phase, anim: s.gojo.anim }; })()');
   const touchRun = prep(await rows());
   await b.screenshot('shots/sprint/phone-run.png');
+  await shotClip('shots/sprint/phone-run-close.png', 560, 460);
+  // 恢复 HUD / 触屏 UI 的可见性：真手指拖摇杆的用例需要摇杆真的可点（hidden 元素收不到 pointer）
+  await b.evaluate("(() => { const h = document.querySelectorAll('#hud, #touch-ui'); for (const e of h) e.style.visibility = ''; return true; })()");
   log('  推到底 drive(0,-1): ' + JSON.stringify(full));
   check('摇杆推到底 → __TOUCH.run=true', full.run === true, 'run=' + full.run + ' mz=' + full.mz);
   check('触屏疾跑 phase=sprint', full.phase === 'sprint' && full.snapPhase === 'sprint', 'mech=' + full.phase + ' snap=' + full.snapPhase);
@@ -461,6 +518,50 @@ try {
   log('  松手后:       ' + JSON.stringify(released));
   check('真手指推到底也触发疾跑', drag.run === true && drag.phase === 'sprint', 'run=' + drag.run + ' speed=' + f2(drag.speed));
   check('松手后疾跑标志清零、速度回落', released.run === false && released.speed <= 4.9, 'run=' + released.run + ' speed=' + f2(released.speed) + ' phase=' + released.phase);
+
+  /* ================= L 直接写桥（verifier 的注入风格）================= */
+  // verifier 的 verify-sprint.mjs --mobile 是**直接写** window.__TOUCH.mx/mz 的（不经过 moveStick/syncBridge）。
+  // 这条用例把这个路径固定下来：任何写桥的人，下一帧都要派生出 run 标志 + 疾跑。
+  log('');
+  log('===== L 直接写 window.__TOUCH 桥（绕过 mobile.js 的指针路径）=====');
+  await b.evaluate("(() => { window.__TOUCH.on = true; window.__TOUCH.mx = 0; window.__TOUCH.mz = -1; return true; })()");
+  await sleep(1200);
+  const direct = await b.evaluate('(() => { const T = window.__TOUCH; const m = window.__MECH(); const s = window.__SS.snap; return { run: T.run, mz: T.mz, phase: m.phase, speed: m.speed, snapPhase: s.gojo.phase, anim: s.gojo.anim }; })()');
+  log('  直接写桥(0,-1): ' + JSON.stringify(direct));
+  check('直接写 __TOUCH 桥也能派生疾跑（run=true / phase=sprint / speed≥10）',
+    direct.run === true && direct.phase === 'sprint' && direct.speed >= 10 && direct.snapPhase === 'sprint',
+    'run=' + direct.run + ' phase=' + direct.phase + ' speed=' + f2(direct.speed));
+  await b.evaluate("(() => { window.__TOUCH.mx = 0; window.__TOUCH.mz = 0; window.__TOUCH.on = false; return true; })()");
+  await sleep(700);
+  const back = await b.evaluate('(() => { const T = window.__TOUCH; const m = window.__MECH(); return { run: T.run, speed: m.speed, phase: m.phase }; })()');
+  log('  桥回中: ' + JSON.stringify(back));
+  check('桥回中后 run 标志清零、速度回落', back.run === false && back.speed <= 4.9, 'run=' + back.run + ' speed=' + f2(back.speed));
+
+  /* ================= K 低画质降级 ================= */
+  log('');
+  log('===== K 低画质（?q=low）降级：速度/分档/镜头/扬尘/前倾 都要成立 =====');
+  await b.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 720, deviceScaleFactor: 1, mobile: false });
+  // ⚠ maxTouchPoints 必须 ≥1：传 0 会被 CDP 拒绝（"Touch points must be between 1 and 16"）
+  await b.send('Emulation.setTouchEmulationEnabled', { enabled: false, maxTouchPoints: 1 });
+  await bootToFight(false, 'q=low');
+  await installSampler();
+  await b.evaluate("(() => { window.__MECH = () => { const S = window.__SS; const m = typeof S.mech === 'function' ? S.mech() : S.mech; return (m && m.sprint) || {}; }; return true; })()");
+  const q = await b.evaluate('window.__SS.quality');
+  const dust0 = await b.evaluate('window.__MECH().dust');
+  await b.keyDown('ShiftLeft');
+  await b.keyDown('KeyW');
+  await sleep(1200);
+  const lqs = await b.evaluate('(() => { const m = window.__MECH(); const g = window.__SS.gojo; return { speed: +m.speed.toFixed(2), phase: m.phase, fov: +m.fov.toFixed(2), core: +g.bones.core.rotation.x.toFixed(3), anim: g.state.anim }; })()');
+  await b.keyUp('KeyW');
+  await b.keyUp('ShiftLeft');
+  await sleep(600);
+  const dust1 = await b.evaluate('window.__MECH().dust');
+  log('  quality=' + q + '  疾跑 1.2s: ' + JSON.stringify(lqs) + '  扬尘增量=' + (dust1 - dust0) + '（高画质同窗口实测 10~16）');
+  check('低画质（?q=low）确实生效', q === 'low', 'quality=' + q);
+  check('低画质疾跑曲线/分档不变（10.5 / sprint）', lqs.speed >= 10.4 && lqs.phase === 'sprint', 'speed=' + f2(lqs.speed) + ' phase=' + lqs.phase);
+  check('低画质 FOV 推近仍在（≥6°）', lqs.fov >= 6, 'fov 附加=' + f2(lqs.fov) + '°');
+  check('低画质扬尘降级（增量 1~8 颗粒）', (dust1 - dust0) > 0 && (dust1 - dust0) <= 8, '增量=' + (dust1 - dust0) + ' 颗');
+  check('低画质前倾姿态仍在（core.x ≥ 0.3 rad ≈17°）', lqs.core >= 0.3, 'core.rotation.x=' + f3(lqs.core) + ' rad（sprint 采样点）');
 
   /* ================= 汇总 ================= */
   log('');

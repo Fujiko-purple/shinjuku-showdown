@@ -19,7 +19,8 @@ const file = arg('file', DEFAULT_FILE);
 const port = parseInt(arg('port', '9515'), 10);
 const low = flag('low');
 const parts = (arg('parts', 'trigger,air,adapt,gate,perf')).split(',');
-const rig = new Rig({ port, file, name: 'mahoraga' + (low ? '-low' : ''), width: low ? 800 : 1280, height: low ? 450 : 720 });
+const mobile = flag('mobile');
+const rig = new Rig({ port, file, name: 'mahoraga' + (mobile ? '-mobile' : (low ? '-low' : '')), mobile, width: mobile ? 844 : (low ? 800 : 1280), height: mobile ? 390 : (low ? 450 : 720) });
 const has = (p) => parts.includes(p);
 
 /** 渲染调用数：连采 n 次取中位数（renderer.info 是累计值，且会被召唤 fx 抬高） */
@@ -128,22 +129,28 @@ try {
   }
 
   if (has('air')) {
+    // air 段要自己保证魔虚罗已经出场（允许单独跑 --parts air）
+    if (!(await rig.ev('window.__MA().alive === true'))) { await summon(); }
     const scan = await rig.ev('window.__SCAN(8)');
     console.log('场景扫描（世界 Y > 8 的顶层节点）: ' + JSON.stringify(scan));
-    // 场景里悬浮的顶层节点很多（月亮 / 广告牌 / 高楼），真正的判据是「叫 mahoraga 的那个节点」
-    const named = (scan || []).filter(c => /mahoraga/i.test(c.name));
-    const cand = (scan || []).filter(c => c.h >= 2 && c.h <= 25 && c.y >= 8 && c.y <= 25);
-    console.log('悬浮候选（h 2~25 且 y 8~25）: ' + JSON.stringify(cand.map(c => ({ n: c.name, y: c.y, h: c.h }))));
-    rig.check('§4 场景里存在名为 mahoraga 的悬浮节点', named.length > 0, JSON.stringify(named.map(c => ({ n: c.name, y: c.y, h: c.h, meshes: c.meshes, visible: c.visible }))));
-    const bodyM = await rig.ev('window.__BODY("mahoraga", 8)');
-    console.log('魔虚罗节点定点量测 = ' + JSON.stringify(bodyM));
-    if (bodyM) {
-      rig.check('§4 魔虚罗悬浮锚点 y 在 14~17（容差 12~19，实测 ' + bodyM.anchorY + '）', bodyM.anchorY >= 12 && bodyM.anchorY <= 19, 'anchorY=' + bodyM.anchorY);
-      rig.check('§4 悬浮躯体高 3.8~4.2m 量级（实测 bodyH=' + bodyM.bodyH + 'm，容差 3.0~6.0）', bodyM.bodyH >= 3.0 && bodyM.bodyH <= 6.0, 'bodyH=' + bodyM.bodyH + ' bodyMinY=' + bodyM.bodyMinY + ' bodyMaxY=' + bodyM.bodyMaxY + ' allH=' + bodyM.allH + ' allMinY=' + bodyM.allMinY + ' meshes=' + bodyM.meshes);
-      rig.check('§4 模型可见', bodyM.visible === true, 'visible=' + bodyM.visible + ' meshes=' + bodyM.meshes);
-    } else {
-      rig.check('§4 场景里存在名字含 mahoraga 的节点', false, '未找到');
-    }
+    // 魔虚罗会在 hover / 俯冲 / 落地弱点窗口之间切换，单帧量测会量到俯冲姿态。
+    // 所以连采 10s，把「悬浮帧」（锚点 y >= 12）单独挑出来做契约判定，另外报俯冲最低点。
+    const msamp = [];
+    for (let i = 0; i < 24; i++) { msamp.push(await rig.ev('window.__BODY("mahoraga", 8)')); await sleep(400); }
+    const valid = msamp.filter(m => m && m.meshes > 0);
+    const ys = valid.map(m => m.anchorY).sort((a, b) => a - b);
+    const hover = valid.filter(m => m.anchorY >= 12);
+    const hoverY = hover.length ? hover.map(m => m.anchorY).sort((a, b) => a - b)[Math.floor(hover.length / 2)] : null;
+    const hoverH = hover.length ? hover.map(m => m.bodyH).sort((a, b) => a - b)[Math.floor(hover.length / 2)] : null;
+    console.log('魔虚罗姿态采样 ' + valid.length + '/' + msamp.length + ' 帧有效: 锚点 y min=' + (ys[0] ?? '-') + ' 中位=' + (ys.length ? ys[Math.floor(ys.length / 2)] : '-') + ' max=' + (ys[ys.length - 1] ?? '-')
+      + ' | 悬浮帧 ' + hover.length + ' 个: 中位 y=' + hoverY + ' 中位 bodyH=' + hoverH + ' | 最小 y=' + (ys[0] ?? '-'));
+    console.log('  采样明细 [anchorY, bodyH, allH, allMinY, meshes]: ' + JSON.stringify(valid.map(m => [m.anchorY, m.bodyH, m.allH, m.allMinY, m.meshes])));
+    rig.check('§4 场景里存在名为 mahoraga 的模型节点（10s 内至少 1 帧量到）', valid.length > 0, '有效帧=' + valid.length + '/' + msamp.length);
+    rig.check('§4 悬浮锚点 y ≈ 14~17（悬浮帧中位 ' + hoverY + '，容差 12~19）', hoverY !== null && hoverY >= 12 && hoverY <= 19, 'hover 帧=' + hover.length + ' y 中位=' + hoverY + ' 全部 y∈[' + (ys[0] ?? '-') + ',' + (ys[ys.length - 1] ?? '-') + ']');
+    rig.check('§4 悬浮躯体高 3.8~4.2m 量级（悬浮帧中位 bodyH=' + hoverH + '，容差 3.0~6.0）', hoverH !== null && hoverH >= 3.0 && hoverH <= 6.0, 'bodyH=' + hoverH);
+    rig.check('§4 会俯冲/落地（10s 内锚点掉到 < 12）', ys.length > 0 && ys[0] < 12, '最低锚点 y=' + (ys[0] ?? '-'));
+    const visN = valid.filter(m => m.visible === true).length;
+    rig.check('§4 模型可见（>= 80% 采样帧）', valid.length > 0 && visN >= Math.ceil(valid.length * 0.8), '可见 ' + visN + '/' + valid.length + ' 帧');
     await rig.ev('window.__SS.combat.reset()');
     await sleep(2200);
     const cLow = await callsMed(3);
@@ -178,37 +185,59 @@ try {
     const lock2 = await rig.ev('!!window.__SS.cam.lockOn');
     console.log('锁状态（应为 true）=' + lock2);
     rig.check('§4 锁定键 KeyQ 能进入 cam.lockOn', lock2 === true, 'lockOn=' + lock2);
+    // 魔虚罗有 0.35s 预判闪避（难度越高概率越高），单发命中率不是 100%，所以每个术式给它 6 次机会。
+    // 注意：苍（SKILL.BLUE）在 SKILL_DATA 里 dmg=0（吸引场），伤害读数为 0 是设计值，
+    //       所以苍只能靠「适应计数 / 法轮」观察是否命中，赫/茈用 hp 差值。
     const hits = {};
     for (const sk of ['blue', 'red', 'purple']) {
-      const a = await rig.ev('window.__MA().hp');
-      await rig.ev('window.__SS.combat.forceSkill(' + JSON.stringify(sk) + ',"gojo")');
-      await sleep(3000);
-      const b = await rig.ev('window.__MA().hp');
-      hits[sk] = { a, b, dmg: +(a - b).toFixed(2) };
-      console.log('  锁定 ' + sk + ': hp ' + a + ' -> ' + b + ' 伤害=' + (a - b).toFixed(2));
+      const attempts = [];
+      let landed = 0;
+      for (let i = 0; i < 6; i++) {
+        const a = await rig.ev('window.__MA().hp');
+        const ad0 = await rig.ev('JSON.stringify(window.__MA().adapt)');
+        await rig.ev('window.__SS.combat.forceSkill(' + JSON.stringify(sk) + ',"gojo")');
+        await sleep(2600);
+        const b = await rig.ev('window.__MA().hp');
+        const ad1 = await rig.ev('JSON.stringify(window.__MA().adapt)');
+        const dmg = +(a - b).toFixed(2);
+        if (dmg > 0.2) landed++;
+        attempts.push({ dmg, adaptChanged: ad0 !== ad1 });
+        if ((b || 0) <= 0) break;
+      }
+      hits[sk] = { landed, total: attempts.length, maxDmg: Math.max(...attempts.map(x => x.dmg)), adaptMoved: attempts.filter(x => x.adaptChanged).length };
+      console.log('  锁定 ' + sk + ': 6 次内造成伤害 ' + landed + '/' + attempts.length + ' 次，最大伤害 ' + hits[sk].maxDmg + '，adapt 变化 ' + hits[sk].adaptMoved + ' 次 ' + JSON.stringify(attempts));
     }
-    rig.check('§4 锁定后 苍/赫/茈 各自至少命中一次', ['blue', 'red', 'purple'].every(k => hits[k] && hits[k].dmg > 0.2), JSON.stringify(hits));
+    rig.check('§4 锁定后 赫/茈 至少各命中一次（6 次机会内）', hits.red.maxDmg > 0.2 && hits.purple.maxDmg > 0.2, JSON.stringify(hits));
+    rig.check('§4 锁定后 苍 也有命中迹象（苍 dmg=0，用 adapt 计数判定）', hits.blue.adaptMoved > 0, JSON.stringify(hits.blue));
   }
 
   if (has('adapt')) {
+    // 先重开一局：前面的对空测试已经把赫/茈的适应计数推上去了，必须从新召唤的魔虚罗开始数
+    await rig.ev('window.__SS.combat.reset()');
+    await sleep(400);
+    await summon();
     if (!(await rig.ev('window.__MA().alive'))) { await summon(); }
     let lockOk = await rig.ev('!!window.__SS.cam.lockOn');
     if (!lockOk) { await rig.ev('window.__V.press("KeyQ")'); await sleep(500); }
     const seq = [];
     const adapt0 = await rig.ev('window.__MA().adapt');
-    for (let i = 0; i < 16 && seq.filter(x => x.dmg > 0.01).length < 4; i++) {
+    for (let i = 0; i < 24 && seq.filter(x => x.dmg > 0.01).length < 4; i++) {
       const a = await rig.ev('window.__MA().hp');
-      await rig.ev('window.__SS.combat.forceSkill("blue","gojo")');
+      await rig.ev('window.__SS.combat.forceSkill("red","gojo")');
       await sleep(2600);
       const b = await rig.ev('window.__MA().hp');
       const d = +(a - b).toFixed(2);
       const ad = await rig.ev('window.__MA().adapt');
-      seq.push({ i, dmg: d, adapt: ad, hpAfter: b });
+      const adN = ad ? Object.keys(ad).reduce((s, k) => s + (ad[k] || 0), 0) : 0;
+      seq.push({ i, dmg: d, adapt: ad, adN, hpAfter: b });
       console.log('  适应试验#' + i + ' 伤害=' + d + ' 剩余hp=' + b + ' adapt=' + JSON.stringify(ad));
       if ((b || 0) <= 0) break;
     }
-    const landed = seq.filter(x => x.dmg > 0.01);
-    console.log('适应序列（只保留命中的）: ' + JSON.stringify(landed));
+    // 「命中」= 适应计数推进（免疫的那次伤害为 0，但它仍然是第 4 次命中，契约要求 0 伤害）
+    let runAd = 0;
+    const landed = [];
+    for (const x of seq) { if (x.adN > runAd) { landed.push(x); runAd = x.adN; } }
+    console.log('适应序列（按 adapt 计数推进取命中）: ' + JSON.stringify(landed.map(x => ({ hit: x.i, dmg: x.dmg, adapt: x.adapt }))));
     if (landed.length >= 4) {
       rig.check('§4 适应：第 2 次同招命中伤害 <= 0.6 x 第 1 次', landed[1].dmg <= 0.6 * landed[0].dmg, 'd1=' + landed[0].dmg + ' d2=' + landed[1].dmg);
       rig.check('§4 适应：第 4 次同招命中免疫（伤害 ≈ 0）', landed[3].dmg < 0.05, 'd4=' + landed[3].dmg);

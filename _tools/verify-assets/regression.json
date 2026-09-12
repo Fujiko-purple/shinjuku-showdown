@@ -1,0 +1,54 @@
+{
+  "file": "dist/新宿决战.html",
+  "results": [
+    {
+      "name": "smoke",
+      "status": "pass",
+      "exit": 0,
+      "seconds": 12.6
+    },
+    {
+      "name": "acceptance",
+      "status": "pass",
+      "exit": 0,
+      "seconds": 39.2
+    },
+    {
+      "name": "probe-movedir",
+      "status": "pass",
+      "exit": 0,
+      "seconds": 90.9
+    },
+    {
+      "name": "probe-dash",
+      "status": "pass",
+      "exit": 0,
+      "seconds": 93.7
+    },
+    {
+      "name": "probe-bgm-dom",
+      "status": "pass",
+      "exit": 0,
+      "seconds": 80.8
+    },
+    {
+      "name": "probe-hudcollide",
+      "status": "pass",
+      "exit": 0,
+      "seconds": 84
+    },
+    {
+      "name": "probe-mobilecase",
+      "status": "pass",
+      "exit": 0,
+      "seconds": 87.3
+    },
+    {
+      "name": "probe-frametime",
+      "status": "pass",
+      "exit": 0,
+      "seconds": 94.3
+    }
+  ],
+  "at": "2026-09-12T12:58:09.544Z"
+}

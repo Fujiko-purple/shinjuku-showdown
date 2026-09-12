@@ -1,0 +1,27 @@
+{
+  "name": "repro090",
+  "file": "tmp/sprint/dist.html",
+  "url": "file:///C%3A/Users/Administrator/Desktop/dsh/%E6%96%B0%E5%AE%BF%E5%AF%B9%E5%86%B3/tmp/sprint/dist.html",
+  "mobile": true,
+  "viewport": [
+    844,
+    390
+  ],
+  "boot": {
+    "state": "fight",
+    "hasSS": true,
+    "quality": "low",
+    "keys": "state,snap,cam,scene,godCam,activeCamera,combat,fx,weapons,audio,city,render,cutscene,gojo,sukuna,quality,stats,mahoraga,blackFlash,hooks,mech,duel",
+    "isTouch": true,
+    "hasInject": true,
+    "hasTouch": true,
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "w": 844,
+    "h": 390,
+    "tap": "getSnapshot"
+  },
+  "results": [],
+  "notes": [],
+  "pageErrors": [],
+  "seconds": 16.3
+}

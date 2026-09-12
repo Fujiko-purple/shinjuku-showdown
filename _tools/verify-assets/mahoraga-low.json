@@ -1,0 +1,103 @@
+{
+  "name": "mahoraga-low",
+  "file": "tmp/verifier/dist.html",
+  "url": "file:///C%3A/Users/Administrator/Desktop/dsh/%E6%96%B0%E5%AE%BF%E5%AF%B9%E5%86%B3/tmp/verifier/dist.html",
+  "mobile": false,
+  "viewport": [
+    800,
+    450
+  ],
+  "boot": {
+    "state": "fight",
+    "hasSS": true,
+    "quality": "low",
+    "keys": "state,snap,cam,scene,godCam,activeCamera,combat,fx,weapons,audio,city,render,cutscene,gojo,sukuna,quality,stats,mahoraga,blackFlash,hooks,mech,duel",
+    "isTouch": false,
+    "hasInject": true,
+    "hasTouch": true,
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "w": 800,
+    "h": 450,
+    "tap": "getSnapshot"
+  },
+  "results": [
+    {
+      "name": "产物可启动并进入 fight",
+      "pass": true,
+      "detail": "state=fight"
+    },
+    {
+      "name": "契约 §1.3 MECH_DEBUG.mahoraga 已注册",
+      "pass": true,
+      "detail": "{\"hp\":0,\"hpMax\":900,\"alive\":false,\"adapt\":{},\"mode\":\"off\",\"skill\":null,\"cd\":0}"
+    },
+    {
+      "name": "mahoraga 自报字段齐全（契约 §1.3）",
+      "pass": true,
+      "detail": "缺 []"
+    },
+    {
+      "name": "§4 场景里存在名为 mahoraga 的模型节点（10s 内至少 1 帧量到）",
+      "pass": true,
+      "detail": "有效帧=24/24"
+    },
+    {
+      "name": "§4 悬浮锚点 y ≈ 14~17（悬浮帧中位 14.98，容差 12~19）",
+      "pass": true,
+      "detail": "hover 帧=1 y 中位=14.98 全部 y∈[0.05,14.98]"
+    },
+    {
+      "name": "§4 悬浮躯体高 3.8~4.2m 量级（悬浮帧中位 bodyH=3.83，容差 3.0~6.0）",
+      "pass": true,
+      "detail": "bodyH=3.83"
+    },
+    {
+      "name": "§4 会俯冲/落地（10s 内锚点掉到 < 12）",
+      "pass": true,
+      "detail": "最低锚点 y=0.05"
+    },
+    {
+      "name": "§4 模型可见",
+      "pass": false,
+      "detail": "visible=[false,true,true,true,true,true,true,true]"
+    },
+    {
+      "name": "§4 魔虚罗模型 draw call 增量 <= 70",
+      "pass": true,
+      "detail": "增量=45 (未出场中位 121 -> 出场后中位 166)"
+    },
+    {
+      "name": "§4 悬浮时近战打不到",
+      "pass": true,
+      "detail": "hp 900 -> 900"
+    },
+    {
+      "name": "§4 未锁定时弹道不会掰向魔虚罗（打不到）",
+      "pass": true,
+      "detail": "hp 900 -> 900"
+    },
+    {
+      "name": "§4 锁定键 KeyQ 能进入 cam.lockOn",
+      "pass": true,
+      "detail": "lockOn=true"
+    },
+    {
+      "name": "§4 锁定后 苍/赫/茈 各自至少命中一次",
+      "pass": false,
+      "detail": "{\"blue\":{\"a\":900,\"b\":900,\"dmg\":0},\"red\":{\"a\":900,\"b\":785,\"dmg\":115},\"purple\":{\"a\":785,\"b\":785,\"dmg\":0}}"
+    },
+    {
+      "name": "低画质仍能召出魔虚罗",
+      "pass": true,
+      "detail": "quality=low"
+    },
+    {
+      "name": "全流程无页面错误",
+      "pass": true,
+      "detail": "[]"
+    }
+  ],
+  "notes": [],
+  "pageErrors": [],
+  "seconds": 53
+}

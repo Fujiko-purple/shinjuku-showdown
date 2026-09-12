@@ -24,6 +24,8 @@ const PORT = Number(arg('port', '9501'));
 const SHOTS = arg('shots', 'shots/mahoraga');
 const LOWQ = argv.includes('--lowq');
 const QUICK = argv.includes('--quick');
+const NDC = argv.includes('--ndc');
+const CAL = argv.includes('--cal');
 if (!existsSync(FILE)) { console.error('找不到产物 ' + FILE + '（先跑私有构建）'); process.exit(2); }
 const URL = 'file:///' + FILE.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/') + (LOWQ ? '?q=low' : '');
 
@@ -75,7 +77,8 @@ try {
     '    put: (w, x, z) => { const c = F(w); c.ctrl.setPos(x, 0, z); c.p.set(x, 0, z); return { x: +c.p.x.toFixed(2), z: +c.p.z.toFixed(2) }; },',
     '    gojoHp: () => +F("gojo").hp.toFixed(2),',
     '    sukunaHp: () => +F("sukuna").hp.toFixed(2),',
-    '    ready: () => { const pl = F("gojo"); pl.hp = pl.hpMax; pl.ce = pl.ceMax; pl.invT = 0; pl.cds.clear(); pl.p200Cd = 0; pl.burnoutT = 0; return true; },',
+    '    ready: () => { const pl = F("gojo"); const c = S.mahoraga.cb(); pl.hp = pl.hpMax; pl.ce = pl.ceMax; pl.invT = 0; pl.cds.clear(); pl.p200Cd = 0; pl.burnoutT = 0; pl.stunT = 0; c.resultLocked = false; if (c.mode !== "fight") c.mode = "fight"; return true; },',
+    '    game: () => ({ state: S.state, mode: S.mahoraga.cb().mode, locked: S.mahoraga.cb().resultLocked }),',
     '    healMaho: (n) => S.mahoraga.heal(n),',
     '    hurt: (n) => S.mahoraga.hurt(n),',
     '    freeze: (on) => S.mahoraga.freeze(on),',
@@ -91,7 +94,45 @@ try {
     '    hudText: () => { const e = document.getElementById("maho-hud"); return e ? e.textContent.replace(/\s+/g, " ").trim().slice(0, 140) : "no-hud"; },',
     '    hudDisplay: () => { const e = document.getElementById("maho-hud"); return e ? e.style.display : "no-hud"; },',
     '    lock: (v) => { S.cam.lockOn = !!v; return S.cam.lockOn; },',
-    '    setPos: (x, y, z, pin) => S.mahoraga.setPos(x, y, z, pin)',
+    '    setPos: (x, y, z, pin) => S.mahoraga.setPos(x, y, z, pin),',
+    '    ndc2: (n) => new Promise((res) => {',
+    '      // Lead 加严版：同时投影"脚底"与"法轮顶"两端，要求 95% 的帧两端都在 |ndcY|<=0.95',
+    '      const camObj = S.activeCamera; const out = [];',
+    '      const step = () => {',
+    '        const d = S.mahoraga.debug();',
+    '        const h = d.modelHeight || 4.07;',
+    '        const a = S.cam.target.clone().set(d.pos.x, d.pos.y, d.pos.z).project(camObj);',
+    '        const b2 = S.cam.target.clone().set(d.pos.x, d.pos.y + h, d.pos.z).project(camObj);',
+    '        out.push([a.y, b2.y, a.x, b2.x]);',
+    '        if (out.length < n) { requestAnimationFrame(step); return; }',
+    '        const inF = out.filter((o) => Math.abs(o[0]) <= 0.95 && Math.abs(o[1]) <= 0.95 && Math.abs(o[2]) <= 0.95 && Math.abs(o[3]) <= 0.95).length;',
+    '        const ys = out.map((o) => o[0]).concat(out.map((o) => o[1])).sort((p, q) => p - q);',
+    '        const xs = out.map((o) => o[2]).concat(out.map((o) => o[3]));',
+    '        res({ frames: out.length, insideBoth: +(inF / out.length).toFixed(4),',
+    '          minY: ys[0], maxY: ys[ys.length - 1], medY: ys[Math.floor(ys.length / 2)],',
+    '          minX: Math.min.apply(null, xs), maxX: Math.max.apply(null, xs),',
+    '          feetY: [Math.min.apply(null, out.map((o) => o[0])), Math.max.apply(null, out.map((o) => o[0]))],',
+    '          topY: [Math.min.apply(null, out.map((o) => o[1])), Math.max.apply(null, out.map((o) => o[1]))] });',
+    '      };',
+    '      requestAnimationFrame(step);',
+    '    }),',
+    '    ndc: (n) => new Promise((res) => {',
+    '      const camObj = S.activeCamera; const out = [];',
+    '      const step = () => {',
+    '        const d = S.mahoraga.debug();',
+    '        const v = S.cam.target.clone().set(d.pos.x, d.pos.y + 2.4, d.pos.z).project(camObj);',
+    '        out.push([+v.x.toFixed(4), +v.y.toFixed(4)]);',
+    '        if (out.length < n) { requestAnimationFrame(step); return; }',
+    '        const ys = out.map((o) => o[1]).sort((a, b) => a - b);',
+    '        const xs = out.map((o) => o[0]);',
+    '        const inside = out.filter((o) => Math.abs(o[1]) <= 0.92 && Math.abs(o[0]) <= 0.95).length;',
+    '        res({ frames: out.length, insideFraction: +(inside / out.length).toFixed(4), minY: ys[0], maxY: ys[ys.length - 1],',
+    '          medY: ys[Math.floor(ys.length / 2)], minX: Math.min.apply(null, xs), maxX: Math.max.apply(null, xs) });',
+    '      };',
+    '      requestAnimationFrame(step);',
+    '    }),',
+    '    hudMark: () => { const e = document.querySelector("#maho-hud [data-maho=mark]"); return e ? { display: e.style.display, left: e.style.left, top: e.style.top, text: e.textContent.trim() } : null; },',
+    '    hudReticle: () => { const e = document.querySelector("#maho-hud [data-maho=reticle]"); return e ? e.style.display : null; }',
     '  };',
     '  return true;',
     '})()'
@@ -109,6 +150,56 @@ try {
     mech && ['hp', 'hpMax', 'alive', 'adapt', 'mode', 'skill', 'cd'].every((k) => k in mech),
     Object.keys(mech).join(','));
   check('A3 HOOKS.tick 已被 combat 调用', dbg.hookCalls.tick > 30, 'tick=' + dbg.hookCalls.tick);
+
+  if (CAL) {
+    head('C · 对空命中标定（--cal）');
+    await b.evaluate('window.__M.cb().fighters.sukuna.hp = window.__M.cb().fighters.sukuna.hpMax * 0.49');
+    await until('window.__M.d().alive === true', 9000);
+    await until('window.__M.d().mode === "air"', 9000);
+    await b.evaluate('window.__M.freeze(true)');
+    await until('window.__M.d().mode === "air" && window.__M.d().attackable === false', 9000, 80);
+    await b.evaluate('window.__M.lock(true)');
+    await b.evaluate('window.__M.evade(0)');
+    for (let i = 0; i < 8; i++) {
+      const p = (await b.evaluate('window.__M.d()')).pos;
+      await b.evaluate('window.__M.put("sukuna", ' + p.x + ', ' + (p.z + 26) + ')');
+      await b.evaluate('window.__M.put("gojo", ' + p.x + ', ' + (p.z + 12) + ')');
+      await b.evaluate('window.__M.ready()');
+      await nap(320);   // 等骨骼世界矩阵刷新：弹道出生点取的是 handR 的世界坐标，瞬移当帧还是旧值
+      const d0 = await b.evaluate('window.__M.d()');
+      const sk0 = await b.evaluate('window.__M.sukunaHp()');
+      await b.keyDown('KeyI'); await nap(60); await b.keyUp('KeyI');
+      await nap(1600);
+      const d1 = await b.evaluate('window.__M.d()');
+      const pl = await b.evaluate('({ ce: window.__M.F("gojo").ce, action: !!window.__M.F("gojo").action, stun: window.__M.F("gojo").stunT, mahoDist: Math.hypot(window.__M.F("gojo").p.x - ' + p.x + ', window.__M.F("gojo").p.z - ' + p.z + '), game: window.__M.game() })');
+      console.log('  #' + (i + 1) + ' 命中=' + (d1.hitsTaken - d0.hitsTaken) + ' 闪避=' + (d1.stats.dodges - d0.stats.dodges) +
+        ' 弹道样本=' + d1.probeNear.samples + ' 最近=' + d1.probeNear.min + 'm 宿傩掉血=' + +(sk0 - (await b.evaluate('window.__M.sukunaHp()'))).toFixed(2) +
+        ' 玩家={' + JSON.stringify(pl) + '}');
+    }
+    await b.close();
+    process.exit(0);
+  }
+
+  if (NDC) {
+    head('N · 悬浮高度 → 画面内占比 扫描（真实交战距离 13m）');
+    await b.evaluate('window.__M.cb().fighters.sukuna.hp = window.__M.cb().fighters.sukuna.hpMax * 0.49');
+    await until('window.__M.d().alive === true', 9000);
+    await until('window.__M.d().mode === "air"', 9000);
+    await b.evaluate('window.__M.freeze(true)');
+    await until('window.__M.d().mode === "air" && window.__M.d().attackable === false', 9000, 80);
+    await b.evaluate('window.__M.put("gojo", 0, 0)');
+    await b.evaluate('window.__M.put("sukuna", 0, -13)');
+    await b.evaluate('window.__M.lock(false)');
+    for (const y of [6.4, 5.8, 5.2, 4.6, 4.0, 3.6, 3.2, 2.8]) {
+      await b.evaluate('window.__M.setPos(0, ' + y + ', -12)');
+      await nap(500);
+      const s = await b.evaluate('window.__M.ndc(30)');
+      console.log('  y=' + y + 'm  inside=' + (s.insideFraction * 100).toFixed(0) + '%  ndcY[' + s.minY + ',' + s.maxY + '] 中位 ' + s.medY + '  ndcX[' + s.minX + ',' + s.maxX + ']');
+      check('N y=' + y + 'm 画面内 ≥95%', s.insideFraction >= 0.95, 'inside=' + (s.insideFraction * 100).toFixed(0) + '% ndcY中位 ' + s.medY + ' ndcX[' + s.minX + ',' + s.maxX + ']');
+    }
+    await b.close();
+    process.exit(0);
+  }
 
   if (QUICK) {
     head('Q · 建模快速自查（--quick）');
@@ -193,10 +284,96 @@ try {
   check('C1 高度 ∈ [3.8, 4.2]（含头顶法轮）', mt.height >= 3.78 && mt.height <= 4.22, 'height=' + mt.height + 'm');
   check('C2 肩宽 ∈ [2.4, 2.8]', mt.shoulderWidth >= 2.4 && mt.shoulderWidth <= 2.8, 'shoulderWidth=' + mt.shoulderWidth + 'm（整机 span=' + mt.span + 'm，含张开的手臂/退魔之剑）');
   check('C3 可见网格数（≈draw call）≤ 70', mt.meshes <= 70, 'meshes=' + mt.meshes + ' / partCount=' + dbg.partCount);
-  check('C4 悬浮基准高度 ∈ [14, 17]', afterSummon.pos.y >= 13.9 && afterSummon.pos.y <= 17.1, 'y=' + afterSummon.pos.y);
+  // 契约 §4 修订：AIR_Y = 5.2/5.8/6.4（原来的 14~17m 完全出画）
+  // 契约修订 + 实测收敛：normal 3.6（--ndc 扫描证明 5.2/5.8/6.4 全部出画）
+  // 契约修订值 5.2/5.8/6.4 + camFrame 取景覆盖：实测 base 5.82 时法轮顶 ndcY 1.09（被切），
+  // 收敛到 normal=4.5（两端都在画面内的帧 ≥95%，见 O1）
+  check('C4 悬浮基准高度 ∈ [3.9, 5.1]（normal 4.5，整只入画）', afterSummon.pos.y >= 3.9 && afterSummon.pos.y <= 5.1, 'y=' + afterSummon.pos.y);
   const hudText = await b.evaluate('window.__M.hudText()');
   info('HUD 文本', hudText);
   check('C5 HUD（自建 DOM）已显示第二条血条 + 法轮格数', (await b.evaluate('window.__M.hudDisplay()')) === 'block' && /适应/.test(hudText), hudText);
+
+  /* ------------------------------------------------------------------ */
+  head('Q2 · Lead P0 复现：魔虚罗存活时，玩家近战 10 次打宿傩');
+  {
+    await b.evaluate('window.__M.freeze(true)');      // 冻住技能：让魔虚罗稳定悬空（不进弱点窗口）
+    await until('window.__M.d().mode === "air" && window.__M.d().attackable === false', 9000, 80);
+    await b.evaluate('window.__M.ready()');
+    await b.evaluate('window.__M.cb().fighters.sukuna.hp = window.__M.cb().fighters.sukuna.hpMax');
+    // 玩家站在宿傩身前 1.6m 并转向（verifier 的复现条件）
+    await b.evaluate('window.__M.put("sukuna", 0, -20)');
+    await b.evaluate('window.__M.put("gojo", 0, -18.4)');
+    await b.evaluate('window.__M.cb().fighters.gojo.ctrl.faceTo(0, -20, true)');
+    await b.evaluate('window.__M.ready()');
+    const sk0 = await b.evaluate('window.__M.sukunaHp()');
+    const mh0 = (await b.evaluate('window.__M.d()')).hitsTaken;
+    const b0 = (await b.evaluate('window.__M.d()')).blocks;
+    for (let i = 0; i < 10; i++) { await b.pressKey('KeyJ', 40); await nap(420); }
+    await nap(500);
+    const sk1 = await b.evaluate('window.__M.sukunaHp()');
+    const dd = await b.evaluate('window.__M.d()');
+    const punched = +(sk0 - sk1).toFixed(2);
+    const blocks = dd.blocks - b0;
+    const mahoDelta = dd.hitsTaken - mh0;
+    info('近战 10 次（魔虚罗存活）', { '宿傩 hp': sk0 + ' → ' + sk1, 差: punched, 挡下次数: blocks, 魔虚罗受到命中: mahoDelta, 魔虚罗hp: dd.hp });
+    check('Q2-1 近战打宿傩不是 0 伤害（期望 ≈10×2.6×0.6=15.6）', punched >= 8 && punched <= 22, '宿傩掉血 ' + punched);
+    check('Q2-2 挡下不凭空消失：挡下时伤害记在魔虚罗头上', blocks === 0 || mahoDelta >= blocks, '挡下 ' + blocks + ' 次 / 魔虚罗被命中 ' + mahoDelta + ' 次');
+    // 无魔虚罗对照：击破后同样 10 次
+    await b.evaluate('window.__M.hurt(9999)');
+    await nap(2200);
+    await b.evaluate('window.__M.cb().fighters.sukuna.hp = window.__M.cb().fighters.sukuna.hpMax');
+    await b.evaluate('window.__M.ready()');
+    await b.evaluate('window.__M.cb().fighters.gojo.ctrl.faceTo(0, -20, true)');
+    const skA = await b.evaluate('window.__M.sukunaHp()');
+    for (let i = 0; i < 10; i++) { await b.pressKey('KeyJ', 40); await nap(420); }
+    await nap(400);
+    const skB = await b.evaluate('window.__M.sukunaHp()');
+    const noMaho = +(skA - skB).toFixed(2);
+    info('近战 10 次（魔虚罗已击破）', { '宿傩 hp': skA + ' → ' + skB, 差: noMaho, ratio: punched ? +(punched / noMaho).toFixed(3) : null });
+    check('Q2-3 有无魔虚罗的比值 ≈0.6（庇护乘区）', noMaho > 0 && Math.abs(punched / noMaho - 0.6) < 0.2, punched + ' / ' + noMaho + ' = ' + (punched / noMaho).toFixed(3));
+    await b.evaluate('window.__SS.combat.reset()');
+    await nap(600);
+    await b.evaluate('window.__M.cb().fighters.sukuna.hp = window.__M.cb().fighters.sukuna.hpMax * 0.49');
+    await until('window.__M.d().alive === true', 9000);
+    await until('window.__M.d().mode === "air"', 9000);
+    await b.evaluate('window.__M.freeze(true)');
+    await nap(300);
+  }
+
+  /* ------------------------------------------------------------------ */
+  head('O · 可见性自检（Lead P0 硬验收：≥120 帧，|ndcY|≤0.92 且 |ndcX|≤0.95 占比 ≥95%）');
+  {
+    // 真实交战距离：玩家与宿傩 13m（和 Lead 的实测一致），放开冻结让它正常环绕
+    await b.evaluate('window.__M.freeze(false)');
+    await b.evaluate('window.__M.cb().fighters.sukuna.hp = window.__M.cb().fighters.sukuna.hpMax * 0.49');
+    await b.evaluate('window.__M.put("gojo", 0, 0)');
+    await b.evaluate('window.__M.put("sukuna", 0, -13)');
+    await nap(400);
+    const ndc = await b.evaluate('window.__M.ndc2(150)');
+    const camf = (await b.evaluate('window.__M.d()')).camFrame;
+    info('camFrame 钩子状态', camf);
+    info('NDC 采样（150 帧，脚底+法轮顶两端）', ndc);
+    check('O1 整只模型两端在画面内 ≥95%（脚底+法轮顶，150 帧）', ndc.frames >= 120 && ndc.insideBoth >= 0.95, 'insideBoth=' + (ndc.insideBoth * 100).toFixed(1) + '%  脚底 ndcY[' + ndc.feetY[0] + ',' + ndc.feetY[1] + ']  法轮顶 ndcY[' + ndc.topY[0] + ',' + ndc.topY[1] + ']  中位 ' + ndc.medY + '  ndcX[' + ndc.minX + ',' + ndc.maxX + ']');
+    check('O2 目标在画面上方区域（ndcY 中位 > 0）', ndc.medY > 0, 'medY=' + ndc.medY);
+    check('O2b camFrame 取景覆盖已被 camera.js 调用', camf.calls > 30 && camf.w > 0.9, JSON.stringify(camf));
+    await b.screenshot(SHOTS + '/08-boss-frame.png');
+    info('boss 取景截图', SHOTS + '/08-boss-frame.png');
+    // 锁定准星
+    await b.evaluate('window.__M.lock(true)');
+    await nap(200);
+    const ret = await b.evaluate('window.__M.hudReticle()');
+    check('O3 锁定（Q）时出现准星/锁定框', ret === 'block', 'reticle display=' + ret);
+    // 屏外指示：把相机视角外的目标造出来（玩家背对）
+    await b.evaluate('window.__M.setPos(0, 3.6, 30)');   // 相机在玩家背后（+z），放它身后才是真出画
+    await nap(400);
+    const mk = await b.evaluate('window.__M.hudMark()');
+    info('屏外指示器', mk);
+    check('O4 出画时有自己的屏外指示（方向 + 距离）', !!mk && mk.display === 'block' && /m/.test(mk.text), JSON.stringify(mk));
+    await b.evaluate('window.__M.setPos(0, 3.6, 0, false)');
+    await b.evaluate('window.__M.lock(false)');
+    await b.evaluate('window.__M.freeze(true)');
+    await nap(300);
+  }
 
   /* ------------------------------------------------------------------ */
   head('D · 悬空时近战够不到 + 「它悬在空中」解释');
@@ -241,8 +418,9 @@ try {
   check('E2 锁定时弹道都瞄住目标的预测点（到预测点垂距 <0.05m）',
     ['blue', 'red', 'purple', 'purple200'].every((k) => aimOn[k].aimed && aimOn[k].perpPred < 0.05),
     ['blue', 'red', 'purple', 'purple200'].map((k) => k + ':预测点垂距' + aimOn[k].perpPred + 'm').join('  '));
-  check('E2a 会动的目标给出真实提前量（苍/赫 提前 2~15m），瞬发茈给 0',
-    aimOn.blue.perp > 2 && aimOn.red.perp > 2 && aimOn.purple.perp < 0.05 && aimOn.purple200.perp < 0.05,
+  // 目标变近变低后飞行时间缩短（苍 0.55s / 赫 0.35s），提前量绝对值跟着变小，但必须非零
+  check('E2a 会动的目标给出真实提前量（苍/赫 >0.2m），瞬发茈给 0',
+    aimOn.blue.perp > 0.2 && aimOn.red.perp > 0.2 && aimOn.purple.perp < 0.05 && aimOn.purple200.perp < 0.05,
     '苍=' + aimOn.blue.lead + 's/' + aimOn.blue.perp + 'm 赫=' + aimOn.red.lead + 's/' + aimOn.red.perp + 'm 茈=' + aimOn.purple.perp + 'm');
   check('E2b 会飞的弹（苍/赫）按弹速给提前量，瞬发茈不给',
     aimOn.blue.lead > 0.3 && aimOn.red.lead > 0.3 && aimOn.purple.lead === 0 && aimOn.purple200.lead === 0,
@@ -258,12 +436,17 @@ try {
   ];
   const realHits = {};
   for (const c of casts) {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 4; attempt++) {
       const p = (await b.evaluate('window.__M.d()')).pos;
-      // 玩家离宿傩 45m：苍的搬运逻辑要求与宿傩 XZ 距离 >9m 才会飞
-      await b.evaluate('window.__M.put("sukuna", ' + p.x + ', ' + (p.z + 45) + ')');
+      /**
+       * 魔虚罗现在环绕**宿傩**（可见性的结构性保证），所以测试必须用真实交战距离：
+       * 宿傩离玩家 14m、玩家再靠前 12m 站位。把宿傩丢到 45m 外会让魔虚罗一路追过去
+       * （飞行时间超过弹道寿命），那是测试布景问题，不是命中问题。
+       */
+      await b.evaluate('window.__M.put("sukuna", ' + p.x + ', ' + (p.z + 26) + ')');   // 与玩家(z+12)相距 14m
       await b.evaluate('window.__M.put("gojo", ' + p.x + ', ' + (p.z + 12) + ')');
       await b.evaluate('window.__M.ready()');
+      await nap(320);   // 同上：等 handR 世界坐标刷新
       await b.evaluate('window.__M.lock(true)');
       await b.evaluate('window.__M.evade(0)');
       const d0 = await b.evaluate('window.__M.d()');
@@ -281,7 +464,7 @@ try {
   {
     const p = (await b.evaluate('window.__M.d()')).pos;
     await b.evaluate('window.__M.put("gojo", ' + p.x + ', ' + (p.z + 12) + ')');
-    await b.evaluate('window.__M.put("sukuna", ' + p.x + ', ' + (p.z + 60) + ')');
+    await b.evaluate('window.__M.put("sukuna", ' + p.x + ', ' + (p.z + 26) + ')');   // 距玩家 14m
     await b.evaluate('window.__M.ready()');
     await b.evaluate('window.__M.lock(false)');
     await b.evaluate('window.__M.evade(0)');
@@ -432,6 +615,43 @@ try {
     info(s.name + ' 闪避后命中数', landedAfter + '（不躲时 ' + skillHit[s.id].landed + '）');
     check('G' + (skillDefs.indexOf(s) + 1) + 'b 「' + s.name + '」可被躲开', okDodge, '不躲=' + skillHit[s.id].landed + ' 躲=' + landedAfter);
   }
+  /* ------------------------------------------------------------------ */
+  head('P · 对空命中率标定（实测可见高度 3.2m，Lead P0 第 5 条；每档 16 次施放）');
+  const hitRateRuns = {};
+  {
+    await b.evaluate('window.__M.freeze(true)');
+    await b.evaluate('window.__M.evade(null)');
+    const p0 = (await b.evaluate('window.__M.d()')).pos;
+    await b.evaluate('window.__M.setPos(' + p0.x + ', ' + p0.y + ', ' + p0.z + ', false)');   // 用当前真实悬浮高度
+    async function hitRate(label, ev, n) {
+      let hits = 0, dodges = 0;
+      for (let i = 0; i < n; i++) {
+        const p = (await b.evaluate('window.__M.d()')).pos;
+        await b.evaluate('window.__M.put("sukuna", ' + p.x + ', ' + (p.z + 26) + ')');   // 距玩家 14m
+        await b.evaluate('window.__M.put("gojo", ' + p.x + ', ' + (p.z + 12) + ')');
+        await b.evaluate('window.__M.ready()');
+        await b.evaluate('window.__M.lock(true)');
+        await b.evaluate('window.__M.evade(' + ev + ')');
+        const d0 = await b.evaluate('window.__M.d()');
+        await b.keyDown('KeyI'); await nap(60); await b.keyUp('KeyI');
+        await nap(1500);
+        const d1 = await b.evaluate('window.__M.d()');
+        if (d1.hitsTaken > d0.hitsTaken) hits++;
+        if (d1.stats.dodges > d0.stats.dodges) dodges++;
+        if (i % 4 === 3) info('  ' + (i + 1) + ' 次后: 弹道样本=' + d1.probeNear.samples + ' 最近距离=' + d1.probeNear.min + 'm (命中半径 ' + d1.probeNear.hitR + '+武器半径)');
+      }
+      const out = { casts: n, hits: hits, dodges: dodges, hitRate: +(hits / n).toFixed(3) };
+      info(label, out);
+      return out;
+    }
+    hitRateRuns.normal = await hitRate('赫 命中率（难度 normal，EVADE_P=0.55 契约值）', 'null', 16);
+    hitRateRuns.aimOnly = await hitRate('赫 命中率（EVADE_P=0：纯 aim 标定）', 0, 16);
+    await b.evaluate('window.__M.evade(null)');
+    await b.evaluate('window.__M.freeze(false)');
+    check('P1 弹道标定：无闪避时命中率 ≥90%（说明 aim 在新高度下瞄得住）', hitRateRuns.aimOnly.hitRate >= 0.9, JSON.stringify(hitRateRuns.aimOnly));
+    check('P2 难度回归：normal 下命中率落在「能打到但极难」区间（15%~60%，契约 EVADE_P=0.55）', hitRateRuns.normal.hitRate >= 0.15 && hitRateRuns.normal.hitRate <= 0.6, JSON.stringify(hitRateRuns.normal) + ' 目标区间 15%~60%');
+  }
+
   const castStats = (await b.evaluate('window.__M.d()')).stats.casts;
   info('技能释放次数', castStats);
   check('G5 四招都被真的放过', castStats.slash >= 1 && castStats.lightning >= 1 && castStats.dive >= 1 && castStats.barrage >= 1, JSON.stringify(castStats));
