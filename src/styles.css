@@ -576,6 +576,18 @@ body::after {
   font-size: 12px; letter-spacing: .14em; color: rgba(255,255,255,.9);
 }
 .audio-panel input { width: 84px; height: 3px; accent-color: var(--crimson); }
+/* --- 背景音乐曲目切换：只有一个音轨时脚本会加 .hidden 自动收起，不占地方 --- */
+.bgm-pick { display: flex; align-items: center; gap: 6px; padding-left: 2px; }
+.bgm-pick.hidden { display: none; }
+.bgm-pick-label { font-family: var(--f-ui); font-size: 12px; letter-spacing: .12em; color: rgba(255,255,255,.62); }
+.bgm-btn {
+  font-family: var(--f-ui); font-size: 12px; letter-spacing: .08em;
+  padding: 3px 9px; border-radius: 7px; cursor: pointer;
+  color: rgba(255,255,255,.78); background: rgba(255,255,255,.07);
+  border: 1px solid rgba(255,255,255,.16); transition: all .15s;
+}
+.bgm-btn:hover { color: #fff; border-color: rgba(255,216,115,.6); }
+.bgm-btn.on { color: var(--ink); background: var(--gold); border-color: var(--gold); font-weight: 700; }
 .audio-panel i { font-family: var(--f-num); font-style: normal; width: 22px; text-align: right; }
 
 /* ============================== 全屏界面 ============================== */

@@ -54617,11 +54617,69 @@ void main() {
     audio?.loop?.("music_intro", { fadeIn: 2 });
   }
   window.addEventListener("pointerdown", unlockAudio, { once: false });
+  /**
+   * 背景音乐曲目表。
+   * 加一首歌只需要两步：① 在 src/body.html 里放一个 <audio id="bgm2" …>；
+   * ② 往这个数组里加一行 { id, name, el }。曲目切换 UI 会自动多出一个按钮。
+   * 选择记在 localStorage（ss_bgm），下次进游戏还是上次那首。
+   */
+  var BGM_TRACKS = [{ id: "rain", name: "雨爱", el: "bgm" }];
+  var bgmTrackId = null;
   var bgmEl = null;
+  var bgmCacheId = "";
   var bgmPlaying = false;
+  function activeTrack() {
+    for (let i = 0; i < BGM_TRACKS.length; i++) if (BGM_TRACKS[i].id === bgmTrackId) return BGM_TRACKS[i];
+    return BGM_TRACKS[0];
+  }
   function bgm() {
-    if (bgmEl === null) bgmEl = $("bgm") || false;
+    const t = activeTrack();
+    const id = t ? t.el : "bgm";
+    if (bgmEl === null || bgmCacheId !== id) {
+      bgmEl = $(id) || false;
+      bgmCacheId = id;
+    }
     return bgmEl || null;
+  }
+  /** 画曲目按钮（只有一个音轨时不显示，避免占地方） */
+  function renderBgmPicker() {
+    const host = $("bgm-pick");
+    if (!host) return;
+    host.textContent = "";
+    if (BGM_TRACKS.length < 2) { host.classList.add("hidden"); return; }
+    host.classList.remove("hidden");
+    const cur = activeTrack();
+    const lab = document.createElement("span");
+    lab.className = "bgm-pick-label";
+    lab.textContent = "曲";
+    host.appendChild(lab);
+    for (let i = 0; i < BGM_TRACKS.length; i++) {
+      const t = BGM_TRACKS[i];
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "bgm-btn" + (cur && t.id === cur.id ? " on" : "");
+      b.textContent = t.name;
+      b.addEventListener("click", () => switchBgm(t.id));
+      host.appendChild(b);
+    }
+  }
+  /** 切曲：停掉其它音轨，重置「已播放」标记后走统一的 startBGM 入口 */
+  function switchBgm(id) {
+    if (id === bgmTrackId) return;
+    bgmTrackId = id;
+    try { localStorage.setItem("ss_bgm", id); } catch (e) { /* 隐私模式忽略 */ }
+    for (let i = 0; i < BGM_TRACKS.length; i++) {
+      const t = BGM_TRACKS[i];
+      if (t.id === id) continue;
+      const el = $(t.el);
+      if (el) { try { el.pause(); el.currentTime = 0; } catch (e) { /* 忽略 */ } }
+    }
+    bgmEl = null;
+    bgmPlaying = false;
+    const mv = $("vol-music");
+    if (mv) setBgmVolume(Number(mv.value) / 100);
+    startBGM();
+    renderBgmPicker();
   }
   function setBgmVolume(v) {
     const el = bgm();
@@ -55527,6 +55585,10 @@ clash=${snap.clashActive} mode=${snap.mode} cam=${cam.dist.toFixed(0)}`;
       setBgmVolume(v);
     });
     vol("vol-sfx", "vol-sfx-label", (v) => audio.setSfx(v));
+    // 恢复上次选的曲目并画出切换按钮（只有一个音轨时自动隐藏）
+    try { bgmTrackId = localStorage.getItem("ss_bgm") || BGM_TRACKS[0].id; }
+    catch (e) { bgmTrackId = BGM_TRACKS[0].id; }
+    renderBgmPicker();
     document.addEventListener("pointerdown", unlockAudio, { once: true });
   }
   boot().catch(crash);
