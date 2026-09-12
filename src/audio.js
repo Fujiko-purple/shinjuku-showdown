@@ -672,6 +672,32 @@
     rig.src(air, t0, 0.56);
     return t0 + 0.62;
   }
+  /**
+   * run_wind —— 疾跑的风声（契约 §7"音效：风噪循环 + 脚步节奏随速度变调"）。
+   * 不是打击音，是一条宽频气流：白噪（高频"嘶"）+ 棕噪（低频"轰"）两层，带通中心从
+   * 380Hz 涌到 900Hz，0.16s 起、0.28s 收 —— 所以它既能当"起步那一下的风扑"（一次性），
+   * 也能被 audio.loop() 串成连续的呼啸。速度变调交给 setRunWind 那条常驻床音。
+   */
+  function playRunWind(rig, t0) {
+    const dur = 0.62;
+    const air = rig.noise("white");
+    const bp = rig.filter("bandpass", 520, 0.75);
+    sweep(bp.frequency, 380, 900, t0, dur * 0.7);
+    const hp = rig.filter("highpass", 240, 0.7);
+    const g = rig.gain(0);
+    rig.link(air, bp, hp, g);
+    g.connect(rig.out);
+    envSwell(g.gain, t0, 0.5, 0.16, 0.18, 0.28);
+    rig.src(air, t0, dur);
+    const low = rig.noise("brown");
+    const lp = rig.filter("lowpass", 220, 0.9);
+    const lg = rig.gain(0);
+    rig.link(low, lp, lg);
+    lg.connect(rig.out);
+    envSwell(lg.gain, t0, 0.24, 0.2, 0.16, 0.26);
+    rig.src(low, t0, dur + 0.05);
+    return t0 + dur;
+  }
   function playLand(rig, t0) {
     const end = impactBody(rig, t0, {
       f0: 88,
@@ -1562,9 +1588,14 @@
     ui_move: { fn: playUiMove, wet: 0.08, gain: 0.7, prio: 1 },
     ui_back: { fn: playUiBack, wet: 0.1, gain: 0.75, prio: 1 },
     charge_ready: { fn: playChargeReady, wet: 0.35, gain: 0.9, prio: 2 },
-    mahoraga: { fn: playMahoraga, wet: 0.4, gain: 0.95, prio: 2 }
+    mahoraga: { fn: playMahoraga, wet: 0.4, gain: 0.95, prio: 2 },
+    // 疾跑风声（一次性"风扑"；持续呼啸走 setRunWind 的常驻床音）
+    run_wind: { fn: playRunWind, wet: 0.25, gain: 0.85, prio: 1 }
   };
   var ALIAS = {
+    run: "run_wind",
+    sprint: "run_wind",
+    wind: "run_wind",
     rush: "dash",
     dash_hit: "dash",
     dodge: "whoosh",
@@ -2294,6 +2325,68 @@
     }
     loops.delete(name);
   }
+  /* --------------------------------------------------------------------------
+     疾跑风噪床音 —— 契约 §7 的"风噪循环"
+     --------------------------------------------------------------------------
+     为什么不用 audio.loop("run_wind")：loop 的补音泵（update() 里）重新起音时用的是
+     **SFX 表里的固定 gain**、不读 opts —— 速度变了音量也不会变；而且它是"每 0.62s 起一条
+     新 voice"的离散节奏。疾跑需要的是**连续**爬升的气流，所以这里单独做一条常驻声部：
+     粉噪 → 带通（中心频率随速度 420→1500Hz）→ 高通 → gain（setTargetAtTime 平滑）。
+     只有一条 source + 两个滤波器，低画质下同样便宜；强度归零时把 gain 压到静音**但不断开**，
+     避免每次起步都重建节点（重建会带一次爆音）。
+     -------------------------------------------------------------------------- */
+  var windBed = null;
+  function ensureWindBed() {
+    if (windBed) return windBed;
+    if (!ready || !ctx) return null;
+    try {
+      const src = ctx.createBufferSource();
+      src.buffer = noiseBuffer("pink");
+      src.loop = true;
+      const bp = ctx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.value = 520;
+      bp.Q.value = 0.72;
+      const hp = ctx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.value = 220;
+      const g = ctx.createGain();
+      g.gain.value = EXP_EPS;
+      src.connect(bp);
+      bp.connect(hp);
+      hp.connect(g);
+      g.connect(sfxBus);
+      src.start();
+      windBed = { src, bp, g, level: 0 };
+    } catch (e) {
+      windBed = null;
+    }
+    return windBed;
+  }
+  /** 每帧调用：amount 0..1（fighters.js 的 Sprint 把 S.fx 送进来） */
+  function setRunWind(amount) {
+    const a = clamp4(Number(amount) || 0, 0, 1);
+    if (a <= 0.002) {
+      if (windBed && windBed.level > 0) {
+        try {
+          windBed.g.gain.setTargetAtTime(EXP_EPS, ctx.currentTime, 0.12);
+        } catch (e) {
+        }
+        windBed.level = 0;
+      }
+      return;
+    }
+    const w = ready ? ensureWindBed() : null;
+    if (!w) return;
+    const now2 = ctx.currentTime;
+    try {
+      // 音量 ∝ 速度；中心频率同步上移 → 低速是"气流声"，高速变"呼啸"
+      w.g.gain.setTargetAtTime(Math.max(EXP_EPS, 0.42 * a), now2, 0.09);
+      w.bp.frequency.setTargetAtTime(420 + 1080 * a, now2, 0.15);
+    } catch (e) {
+    }
+    w.level = a;
+  }
   function setMaster(v) {
     volMaster = clamp4(Number(v) || 0, 0, 1.5);
     if (ready && masterGain) masterGain.gain.setTargetAtTime(volMaster, ctx.currentTime, 0.03);
@@ -2371,6 +2464,11 @@
       unlock,
       play,
       loop,
+      // 疾跑风噪：常驻床音（速度连续可调），见上面的 setRunWind
+      runWind: setRunWind,
+      get runWindState() {
+        return { level: windBed ? windBed.level : 0, bed: !!windBed };
+      },
     setMusicSuppressed,
     /** 诊断口：当前有没有程序化配乐在放（排查"两首歌重叠"用） */
     get musicState() { return { suppressed: musicSuppressed, active: Object.keys(activeMusic) }; },

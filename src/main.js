@@ -1247,8 +1247,12 @@ clash=${snap.clashActive} mode=${snap.mode} cam=${cam.dist.toFixed(0)}`;
     get hooks() {
       return HOOKS;
     },
-    /** 四个机制模块的自报状态（注册表在 contract.js 的 MECH_DEBUG） */
-    get mech() {
+    /**
+     * 四个机制模块的自报状态（注册表在 contract.js 的 MECH_DEBUG）。
+     * ⚠ 必须写成方法 __SS.mech()，不是 getter —— 契约 §1.3 是这么写的，
+     *   四位作者的探针照抄契约，改成 getter 会让他们的脚本全部报 "not a function"。
+     */
+    mech() {
       const out = {};
       for (const k in MECH_DEBUG) {
         try {

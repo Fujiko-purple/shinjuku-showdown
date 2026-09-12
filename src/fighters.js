@@ -2,6 +2,7 @@
     "idle",
     "walk",
     "run",
+    "sprint",
     "dash",
     "jump",
     "land",
@@ -3052,6 +3053,13 @@
       [0.9, -0.82, { core: P(0.04, 0, 0), chest: P(0.03, 0, 0), neck: P(0.06, 0.04, 0), head: P(0.08, 0.06, 0) }]
     ]
   };
+  /**
+   * 「疾跑」步态剪辑：**复用 run 的关键帧数据**，靠下面 GAIT_AMP.sprint 的更大夸张系数
+   * 与更快的 animSpeed 生成"步幅更大、步频更快、摆臂更狠"的独立步态。
+   * 采样器 compile() 会对每帧做浅拷贝（frames[i].pose 是新对象），所以共享原始数组
+   * 不会污染 run 的数据；两条步态各自独立编译、独立缓存。
+   */
+  POSE_LIB.sprint = POSE_LIB.run;
   var ONESHOT = {
     dash: "easeIn",
     punch: "easeOut",
@@ -3095,7 +3103,8 @@
    * 防御的护盾/光环由 guardOn 驱动，不依赖骨骼姿势，接管动画不会丢视觉。
    */
   var HOLD_LOOP = {};
-  var animSpeed = (name) => name === "run" ? 0.72 : name === "walk" ? 0.95 : name === "idle" ? 2.6 : 1.15;
+  /* 步频（每秒推进多少"剪辑秒"）：sprint 比 run 快 11%，配合 strideScale 让脚不打滑 */
+  var animSpeed = (name) => name === "sprint" ? 0.8 : name === "run" ? 0.72 : name === "walk" ? 0.95 : name === "idle" ? 2.6 : 1.15;
   var OVERRIDES = {
     gojo: {
       taunt: { head: P(-0.22, 0.2, -0.1), upperArmR: P(-1.25, 0, -0.3), foreArmR: P(-0.35, 0, 0), handR: P(-0.55, 0, 0), core: P(-0.04, -0.16, 0) }
@@ -3129,6 +3138,17 @@
       upperArmL: [1.55, 1, 1.25], upperArmR: [1.55, 1, 1.25],
       foreArmL: [1.35, 1, 1], foreArmR: [1.35, 1, 1],
       hips: [1.25, 1.6, 1.7], core: [1.35, 1.5, 1.7], chest: [1.35, 1.5, 1.7]
+    },
+    /* 疾跑：大腿前后摆幅 +72%、摆臂 +85%、骨盆/肩带扭转更大 —— 相机拉远后角色只占屏高
+     * ~16%，只有把步态再放大一档，"冲刺"和"小跑"才在小尺寸下一眼分得清。 */
+    sprint: {
+      ry: 2.05,
+      thighL: [1.9, 1, 1.5], thighR: [1.9, 1, 1.5],
+      shinL: [1.75, 1, 1.1], shinR: [1.75, 1, 1.1],
+      footL: [1.5, 1, 1.05], footR: [1.5, 1, 1.05],
+      upperArmL: [1.85, 1, 1.45], upperArmR: [1.85, 1, 1.45],
+      foreArmL: [1.5, 1, 1], foreArmR: [1.5, 1, 1],
+      hips: [1.35, 1.85, 1.95], core: [1.45, 1.7, 1.95], chest: [1.45, 1.7, 1.95]
     }
   };
   function createSampler(lib, overrides) {
@@ -3269,6 +3289,35 @@
      * 只能靠猜 curName / curLoop / gaitCd 到底是几，浪费了大量时间。
      */
     const dbg = { mv: 0, want: 0, wantAnim: "", cd: 0, blocked: 0, sp: 0, gaitIn: 0 };
+    /**
+     * 疾跑状态（契约 §7：状态存在 ctrl 上）。
+     * 写它的人：Sprint.moveHook（速度曲线）、Sprint.frame（每帧强度/扬尘/风噪）。
+     * 读它的人：Sprint.locomotion（phase 分档）、moveTowards（步态选择）、本文件的姿态层、
+     *           camera.js（FOV / 后拉 / 径向模糊）、window.__SS.mech.sprint（探针）。
+     */
+    const sprint = {
+      amt: 0,               // 疾跑强度 0..1 = (speed-WALK)/(TOP-WALK)，驱动镜头/风/扬尘
+      prog: 0,              // 0..1 起步线性进度（只用来分 walk/run/sprint 三档）
+      speed: SPRINT.WALK,   // 本帧目标速度 m/s（move 钩子把它换算成倍率）
+      spdNow: 0,            // 实测位移速度 m/s（攻击减速时它比 speed 低 → 特效跟着掉）
+      fx: 0,                // 平滑后的特效强度（= max(amt, 实测速度归一)），镜头/风都用它
+      phase: "walk",        // walk / run / sprint
+      accelPhase: "idle",   // idle / accel / top / decel
+      dashHeld: false,
+      riseT: 0, fallT: 0, fallFrom: SPRINT.WALK, fallProg: 0,
+      cmdAge: 99,           // 距上次收到移动指令的秒数（>1.6 帧 = 玩家松手）
+      gaitP: 0,             // 上次采样到的步态相位（0..1），用于踩地检测
+      dust: 0,              // 累计扬尘粒子数（探针读）
+      steps: 0,             // 累计脚步数
+      wind: 0,              // 当前风噪强度（0..1）
+      fov: 0,               // 当前 FOV 附加（度）
+      fovAbs: 0,            // 当前相机 FOV 绝对值（度，探针对比用）
+      blur: 0,              // 当前径向模糊强度
+      turnLag: 0,           // 过弯压镜的平滑量（camera.js 消费）
+      gustArmed: true       // 起步那一下的"风声扑"只响一次
+    };
+    // ctrl 的字面量在上面已经求值过了，这里再挂：直接写进字面量会踩 const 的 TDZ
+    ctrl.sprint = sprint;
     let cmdAge = 0;                // 连续多少次更新没有收到移动指令
     let curHold = false;           // 本次动作播完是否要保持末帧（受击硬直等）
     let turnVel = 0;               // 转身角速度 rad/s
@@ -3291,6 +3340,7 @@
     let blendTime = 0;
     let blendSteps = 0;     // 过渡经过了多少次 update（兜底：dt 异常时也能保证收敛）
     let lastDt = 0;         // 最近一次 update 的 dt（诊断用）
+    let lastClipDur = 1;    // 最近一次采样的剪辑时长（扬尘要靠它算步态相位）
     let stepPeak = 0;       // 自上次 play 起，单次 update 内骨骼最大变化量（弧度）
     const setFlash = (v) => {
       flash = clamp5(v, 0, 1);
@@ -3325,13 +3375,17 @@
       state2.animT = curT;
       const clip = sampler.get(curName);
       const dur = clip ? clip.dur : 1;
+      lastClipDur = dur;
       // 步频跟随实际速度：脚不打滑（脚滑是"玩起来不像 3D 游戏"的最大来源之一）。
       // 走/跑时用真实速度除以该动作的额定速度，冲刺时步频自然加快。
       let strideScale = 1;
-      if (curName === "walk" || curName === "run") {
+      if (curName === "walk" || curName === "run" || curName === "sprint") {
         const spNow0 = Math.hypot(vX, vZ);
-        const ref = curName === "run" ? RUN_SPEED : WALK_SPEED;
-        strideScale = clamp5(spNow0 / Math.max(ref, 0.01), 0.5, 1.75);
+        // sprint 的额定速度更高（顶速 10.5 那一档），额定值不跟着抬的话步频会被钳到
+        // 上限、脚开始打滑 —— 脚滑是"玩起来不像 3D 游戏"的最大来源之一
+        const ref = curName === "sprint" ? RUN_SPEED * 1.35 : curName === "run" ? RUN_SPEED : WALK_SPEED;
+        const cap = curName === "sprint" ? 2.1 : 1.75;
+        strideScale = clamp5(spNow0 / Math.max(ref, 0.01), 0.5, cap);
       }
       curT += d * curSpeed * strideScale;
       if (curLoop) {
@@ -3496,6 +3550,52 @@
           h.mesh.rotation.z = h.base.z - headVel.x * 0.1 * h.lag;
         }
       }
+      /**
+       * ---- 疾跑姿态层（契约 §7：跑动前倾 / 摆臂大 / 步频快）----
+       * ⚠ 这一层**故意放在 q.secondary 之外**：低画质下上面的程序化行走层整块被跳过
+       *   （省 CPU），但"疾跑前倾 + 弯肘摆臂"只有十来个骨骼加法，代价可忽略，必须保住 ——
+       *   否则低画质手机上疾跑和走路的剪影一模一样，用户报的"没有疾跑的感觉"在低端机上
+       *   就等于没修。强度用 sprint.fx（0..1，平滑过的实测速度），所以加速/减速过程里
+       *   姿态是连续"长出来"的，不是一帧硬切。
+       */
+      {
+        const S = sprint.fx;
+        if (S > 0.015) {
+          // 步态相位：优先取当前剪辑的相位（脚踩地与骨盆起伏严格同相），
+          // 非步态动作（冲刺/受击/被击退）退回自由相位
+          const ph = (curName === "walk" || curName === "run" || curName === "sprint") && dur > 0
+            ? curT / dur * Math.PI * 2
+            : tGlobal * 11.6;
+          const s = Math.sin(ph);
+          // 前倾：疾跑上身压到约 17°，颈/头反向抬起来保持看前方（人跑步时头不会跟着埋下去）
+          const lean = 0.30 * S;
+          bones.core.rotation.x += lean;
+          bones.chest.rotation.x += lean * 0.42;
+          bones.hips.rotation.x += lean * 0.22;
+          bones.neck.rotation.x -= lean * 0.62;
+          bones.head.rotation.x -= lean * 0.30;
+          // 大摆臂 + 弯肘：肘部收紧是"真在跑"的剪影特征（在原步态之上再多 0.44 rad 前后摆）
+          bones.upperArmL.rotation.x += s * 0.44 * S;
+          bones.upperArmR.rotation.x -= s * 0.44 * S;
+          bones.upperArmL.rotation.z += 0.10 * S;
+          bones.upperArmR.rotation.z -= 0.10 * S;
+          bones.foreArmL.rotation.x -= 0.52 * S;
+          bones.foreArmR.rotation.x -= 0.52 * S;
+          // 骨盆与肩带反向扭转：躯干是"拧"着往前冲的
+          const twY = -s * 0.30 * S;
+          const twZ = -s * 0.06 * S;
+          bones.hips.rotation.y += s * 0.20 * S;
+          bones.chest.rotation.y += twY;
+          bones.chest.rotation.z += twZ;
+          // 过弯压肩：在下面的 leanRoll（±0.26）之上再叠一份"疾跑专属"的额外侧倾，
+          // 高速拐弯时肩线明显压向内侧 —— 转向惯性在剪影上也读得出来
+          const bank = clamp5(-turnVel * 0.022, -0.16, 0.16) * S;
+          bones.core.rotation.z += bank;
+          // 头稳住（这一段在头部稳定之后执行，得单独再补一次）
+          bones.head.rotation.y -= twY * 0.6;
+          bones.head.rotation.z -= (twZ + bank) * 0.45;
+        }
+      }
       if (q.cloth) {
         knock.multiplyScalar(Math.max(0, 1 - d * 7.5));
         const speed = knock.length();
@@ -3543,7 +3643,7 @@
          * curName 永远停在 walk/run，角色**站着不动、双腿却定格在迈步的中间帧**，
          * 看起来像个人偶。同理，一次性动作播完了也没人接管时一并回收。
          */
-        if (spNow < 0.9 && (curName === "walk" || curName === "run" || (!curLoop && ended && !HOLD_AFTER_END[curName]))) {
+        if (spNow < 0.9 && (curName === "walk" || curName === "run" || curName === "sprint" || (!curLoop && ended && !HOLD_AFTER_END[curName]))) {
           play2("idle", { loop: true });
         }
       }
@@ -3636,7 +3736,7 @@
       blendTime = 0;
       blendSteps = 0;
       stepPeak = 0;
-      blendDur = ONESHOT[name] ? 0.16 : (name === "walk" || name === "run" ? 0.15 : name === "idle" ? 0.2 : 0.16);
+      blendDur = ONESHOT[name] ? 0.16 : (name === "walk" || name === "run" || name === "sprint" ? 0.15 : name === "idle" ? 0.2 : 0.16);
       curName = name;
       curT = 0;
       ended = false;
@@ -3646,6 +3746,8 @@
       onEndCb = typeof opt.onEnd === "function" ? opt.onEnd : null;
       state2.anim = name;
       if (/^(punch|punch2|kick|upper|combo_finish|dash|backstep|air_spin)$/.test(name)) state2.phase = "attack";
+      // 疾跑步态有独立 phase（契约 §7 要求 phase 能读到 sprint）；其余步态仍归 "move"
+      else if (name === "sprint") state2.phase = "sprint";
       else if (/^(walk|run|jump|land)$/.test(name)) state2.phase = "move";
       else if (/^(block|block_hit|guard_infinity)$/.test(name)) state2.phase = "guard";
       else if (/^(hit_light|hit_heavy|knockback)$/.test(name)) state2.phase = "hit";
@@ -3694,8 +3796,31 @@
       // 起步不再瞬间到全速：指数逼近，冲刺跟手更快、走位更有重量
       const tau = want > 6.5 ? 0.055 : 0.085;
       const k = 1 - Math.exp(-Math.max(dt, 1e-4) / tau);
-      vX += (moveDir.x * want - vX) * k;
-      vZ += (moveDir.z * want - vZ) * k;
+      /**
+       * 转向惯性（疾跑手感的一部分）：
+       * 把"速度幅值"与"方向"拆成两个一阶滤波 —— 幅值仍然是 55ms 跟手（契约 §7 的
+       * 0.35s 起步曲线不能被拖慢），而**方向**在高速时变慢：
+       *   低速 tauDir = 55ms（与改前完全一致，不碰走位手感）
+       *   高速 tauDir → 143ms（上限 160ms）：10.5 m/s 下方向滞后 ≈ v·tau ≈ 1.5m
+       * 走路是"原地转向"，疾跑是"跑出一条弧" —— 这是速度感里最容易被忽略、
+       * 但玩家一定察觉得到的一条。
+       */
+      const tauDir = want > 6.5 ? Math.min(0.16, 0.055 + (want - 6.5) * 0.022) : 0.055;
+      if (tauDir > tau + 1e-6) {
+        const kd = 1 - Math.exp(-Math.max(dt, 1e-4) / tauDir);
+        const mNow = Math.hypot(vX, vZ);
+        const mNew = mNow + (want - mNow) * k;
+        let uX = moveDir.x, uZ = moveDir.z;
+        if (mNow > 1e-4) { uX = vX / mNow; uZ = vZ / mNow; }
+        uX += (moveDir.x - uX) * kd;
+        uZ += (moveDir.z - uZ) * kd;
+        const ul = Math.hypot(uX, uZ) || 1;
+        vX = uX / ul * mNew;
+        vZ = uZ / ul * mNew;
+      } else {
+        vX += (moveDir.x * want - vX) * k;
+        vZ += (moveDir.z * want - vZ) * k;
+      }
       const sp = Math.hypot(vX, vZ);
       const step = Math.min(len, sp * Math.max(dt, 1e-4));
       if (sp > 1e-5) {
@@ -3711,11 +3836,22 @@
       // 循环中的"非步态"动作（防御姿势、蓄力等）也应该能被走跑接管，
       // 否则只要有一个循环动作没人负责收尾，角色就会一边滑一边保持那个姿势。
       // HOLD_LOOP 里的动作是真正需要玩家保持姿势的，不抢。
-      const loopingForeign = curLoop && curName !== "idle" && curName !== "walk" && curName !== "run" && !HOLD_LOOP[curName];
-      if (curName === "idle" || curName === "walk" || curName === "run" || oneShotDone || loopingForeign) {
+      const loopingForeign = curLoop && curName !== "idle" && curName !== "walk" && curName !== "run" && curName !== "sprint" && !HOLD_LOOP[curName];
+      if (curName === "idle" || curName === "walk" || curName === "run" || curName === "sprint" || oneShotDone || loopingForeign) {
         // 用"实际速度"驱动动画，起步时会自然经过 idle → walk → run
         const spd = Math.max(sp, want * 0.55);
         let wantAnim = spd >= RUN_SPEED * 0.8 ? "run" : spd >= WALK_SPEED * 0.5 ? "walk" : "idle";
+        /**
+         * 疾跑分档：走 → 跑 → 冲三档按**起步进度 prog**推进，而不是"速度到了就跳"。
+         * prog 是线性的 0.35s 进度；若用速度阈值，ease-out 曲线会让玩家一按 Shift
+         * 就直接跳进冲刺档，"起步"这一段就白做了。
+         * 只有玩家自己（gojo）有 sprint 强度；宿傩的 amt 恒为 0，行为与改前一致。
+         */
+        if (sprint.amt > 0.01) {
+          if (sprint.prog >= SPRINT.PHASE_SPRINT) wantAnim = "sprint";
+          else if (sprint.prog >= SPRINT.PHASE_RUN) wantAnim = "run";
+          else if (spd >= WALK_SPEED * 0.5) wantAnim = "walk";
+        }
         /**
          * 兜底：只要这一帧确实收到了移动指令（能走到这里就说明有输入），就**至少播走**。
          * 之前 wantAnim 会因为速度阈值/降速系数掉到 "idle"，于是角色以站姿在地面上滑行 ——
@@ -3738,7 +3874,7 @@
          */
         // 冷却只在"步态之间"切换时生效；从招式/防御这种非步态状态切回来必须立刻切，
         // 否则出完招之后会有一段"以站姿滑行"的空窗（实测 0.4 秒量级）。
-        const inGait = curName === "walk" || curName === "run" || curName === "idle";
+        const inGait = curName === "walk" || curName === "run" || curName === "sprint" || curName === "idle";
         dbg.wantAnim = wantAnim;
         dbg.cd = gaitCd;
         dbg.sp = sp;
@@ -3753,8 +3889,16 @@
            * 而"进/出 idle"必须干脆，否则角色会以站姿在地面上滑行。
            * 所以：步态之间 0.34s（> 交叉淡入 0.2s，保证每次都过渡完），跨界 0.12s。
            */
-          const bothLoco = (curName === "walk" || curName === "run") && (wantAnim === "walk" || wantAnim === "run");
-          gaitCd = bothLoco ? 0.34 : 0.12;
+          const rank = (n) => n === "sprint" ? 3 : n === "run" ? 2 : n === "walk" ? 1 : 0;
+          const bothLoco = rank(curName) >= 1 && rank(wantAnim) >= 1;
+          /**
+           * 上行（走→跑→冲）用短冷却：疾跑起步只有 0.35s，三档各占 0.1s 左右，
+           * 沿用 0.34s 的话"跑"那一档会被冷却直接跳过（实测 anim 序列 walk@0.01 → sprint@0.36，
+           * 中间的 run 从没播过）。下行/同级抖动仍然是 0.34s —— 那条防抖是为了挡住
+           * "出招降速时 want 在阈值附近来回跳 = 每帧重起手 = 动作僵硬"的老问题。
+           */
+          const ascending = bothLoco && rank(wantAnim) > rank(curName);
+          gaitCd = bothLoco ? (ascending ? 0.14 : 0.34) : 0.12;
         } else if (wantAnim !== curName) {
           dbg.blocked++;
         }
@@ -3933,7 +4077,9 @@
           blending: blending ? 1 : 0, blendTime: +blendTime.toFixed(3), blendSteps, dt: +lastDt.toFixed(4),
           stepPeak: +stepPeak.toFixed(3),
           mv: dbg.mv, want: +dbg.want.toFixed(2), wantAnim: dbg.wantAnim,
-          cd: +dbg.cd.toFixed(3), blocked: dbg.blocked, sp: +dbg.sp.toFixed(2), gaitIn: dbg.gaitIn
+          cd: +dbg.cd.toFixed(3), blocked: dbg.blocked, sp: +dbg.sp.toFixed(2), gaitIn: dbg.gaitIn,
+          // 步态相位源头：Sprint.frame 靠 name+dur+t 判断"哪只脚踩地了"
+          dur: +lastClipDur.toFixed(3), phase: state2.phase, sprintAmt: +sprint.amt.toFixed(3)
         }),
         enumerable: true
       }
@@ -3942,3 +4088,371 @@
     applyAuraMats();
     return ctrl;
   }
+
+  /* ==========================================================================
+     疾跑手感 —— Sprint（task-5 · 契约 §7）
+     --------------------------------------------------------------------------
+     用户原话：「这个疾跑也做的不太好 没有疾跑的感觉」。改前按住 Shift 只是把速度
+     4.8 → 8.8，没有起步、没有姿态、没有镜头、没有风、没有扬尘 —— 就是"走快了一点点"。
+
+     本模块（全部写在 fighters.js；状态按契约 §7 挂在 ctrl.sprint 上）：
+       1) 速度曲线 —— Sprint.moveHook（HOOKS.move 数值链）
+          按住 Shift 0.35s 内 4.8 → 10.5（ease-out 三次曲线）；松开 0.25s 回落
+          （smoothstep：起步慢、收尾稳 = 一段惯性滑行，不是瞬间钉死）。
+          返回的是倍率 speed/base，base 就是 combat 那一行紧接着要乘的
+          (inp.dash ? TUNE.DASH_SPEED : TUNE.MOVE_SPEED)，所以最终施加的速度
+          **精确等于**曲线上的值 —— 探针量到的位移就能直接对表。
+       2) 动画分档 —— Sprint.locomotion（HOOKS.locomotion）
+          phase: walk / run / sprint（按线性起步进度 prog 分档，见 PHASE_RUN/PHASE_SPRINT）
+          步态剪辑：POSE_LIB.sprint（= run 关键帧 + GAIT_AMP.sprint 更大夸张 + animSpeed 0.80）
+          姿态叠加：前倾 / 大摆臂 / 弯肘 / 骨盆反向扭转 / 过弯压肩（update2 里的"疾跑姿态层"）
+       3) 每帧 —— Sprint.frame（HOOKS.tick 与 camera.js 的 updateGodCam 双驱动，按 cb.frame 去重）
+          扬尘：踩地帧触发 fx.debris + fx.groundRing，位置取**脚骨世界坐标**（不是角色原点）
+          脚步 SFX 随速度变调（rate 0.85→1.4）、风噪床音 audio.runWind(fx)
+       4) 转向惯性 —— moveTowards 里把"速度幅值"与"方向"拆成两个一阶滤波，
+          高速时方向时间常数 55ms → 130ms（跑出弧线，见那里的注释）
+     低画质降级：扬尘数量 3 → 1、地面圈隔次生成；前倾/摆臂姿态保留（十来个骨骼加法）。
+     ========================================================================== */
+  var SPRINT = {
+    WALK: 4.8,
+    // 基准走速（运行时优先读 TUNE.MOVE_SPEED）
+    TOP: 10.5,
+    // 疾跑顶速（契约 §7）
+    UP: 0.35,
+    // 起步时长（契约 §7）
+    DOWN: 0.25,
+    // 松手回落时长（契约 §7）
+    PHASE_RUN: 0.22,
+    // prog ≥ 0.22 → run（约 0.077s）
+    PHASE_SPRINT: 0.62,
+    // prog ≥ 0.62 → sprint（约 0.217s）
+    FOV_MAX: 8,
+    // 满疾跑 FOV 附加（度）—— 契约验收要求 ≥ 6°
+    DIST_MAX: 0.05,
+    // 满疾跑相机后拉 5%
+    BLUR_MAX: 0.15,
+    // 满疾跑径向模糊（render.impulse.radialBlur，上限 0.6）
+    DUST_MIN: 0.3
+    // fx 低于这个值不扬尘（走路 4.8 m/s 时 fx≈0.16，所以走路不扬尘）
+  };
+  /** 读 TUNE（combat.js 的 var，同一 IIFE 作用域）；缺失时退回默认值 */
+  function sprintTune(key, dflt) {
+    if (typeof TUNE !== "undefined" && TUNE && typeof TUNE[key] === "number") return TUNE[key];
+    return dflt;
+  }
+  function sprintEaseOut3(x) {
+    return 1 - Math.pow(1 - clamp5(x, 0, 1), 3);
+  }
+  function sprintSmooth(x) {
+    const t = clamp5(x, 0, 1);
+    return t * t * (3 - 2 * t);
+  }
+  var sprintFootV = new Vector3();
+  var Sprint = {
+    _cb: null,
+    _stamp: -1,
+    _px: 0,
+    _pz: 0,
+    _yaw: 0,
+    _hasPos: false,
+    _windSent: -1,
+    /** 拿到玩家（gojo）的疾跑状态；没有战斗对象时返回 null */
+    _S() {
+      const cb = this._cb;
+      const c = cb && cb.fighters && cb.fighters[SIDE.GOJO];
+      return c && c.ctrl ? c.ctrl.sprint || null : null;
+    },
+    attach(cb) {
+      this._cb = cb;
+      this.resetAll(cb);
+    },
+    resetAll(cb) {
+      if (cb) this._cb = cb;
+      const S = this._S();
+      if (S) {
+        S.amt = 0;
+        S.prog = 0;
+        S.speed = SPRINT.WALK;
+        S.spdNow = 0;
+        S.fx = 0;
+        S.phase = "walk";
+        S.accelPhase = "idle";
+        S.dashHeld = false;
+        S.riseT = 0;
+        S.fallT = 0;
+        S.fallFrom = SPRINT.WALK;
+        S.fallProg = 0;
+        S.cmdAge = 99;
+        S.gaitP = 0;
+        S.gustArmed = true;
+        S.turnLag = 0;
+      }
+      this._hasPos = false;
+      this._windSent = -1;
+      const c = cb && cb.fighters && cb.fighters[SIDE.GOJO];
+      if (c && c.ctrl && c.ctrl.sprint && cb.audio && cb.audio.runWind) {
+        try {
+          cb.audio.runWind(0);
+        } catch (e) {
+        }
+      }
+    },
+    /** 当前特效强度 0..1（镜头/风噪/径向模糊都用它） */
+    fxLevel() {
+      const S = this._S();
+      return S ? S.fx : 0;
+    },
+    /** FOV 附加（度）：0 → +8，契约验收要 ≥ 6° */
+    fovAdd() {
+      return this.fxLevel() * SPRINT.FOV_MAX;
+    },
+    /** 相机距离倍数：1 → 1.05（"稍后拉"） */
+    distMul() {
+      return 1 + this.fxLevel() * SPRINT.DIST_MAX;
+    },
+    /** 径向模糊强度（"速度线"） */
+    blur() {
+      return this.fxLevel() * SPRINT.BLUR_MAX;
+    },
+    /** 过弯压镜的侧倾量（rad），camera.js 在 lookAt 之后叠加 */
+    turnRoll() {
+      const S = this._S();
+      return S ? S.turnLag : 0;
+    },
+    /**
+     * 速度曲线状态机。dash=true 走上升曲线，false 走回落曲线。
+     * 两个状态量：
+     *   prog —— 0..1 起步**线性**进度（只用于 walk/run/sprint 分档）
+     *   amt  —— (speed-WALK)/(TOP-WALK) 的强度（驱动镜头/风/扬尘）
+     * 之所以分开：ease-out 曲线前 25% 时间就跑完一半行程，拿它分档会让玩家
+     * "一按 Shift 直接进冲刺"；分档挂在 prog 上才有 走→跑→冲 的三段。
+     */
+    update(S, dash, d) {
+      const TOP = sprintTune("SPRINT_TOP", SPRINT.TOP);
+      const WALK = sprintTune("MOVE_SPEED", SPRINT.WALK);
+      const span = Math.max(0.01, TOP - WALK);
+      if (dash) {
+        // 上升：中途再按 Shift（松了半秒又按住）时从当前速度"接上去"，不让速度掉回 4.8
+        if (!S.dashHeld) {
+          const kk = clamp5((S.speed - WALK) / span, 0, 1);
+          S.riseT = (1 - Math.cbrt(Math.max(0, 1 - kk))) * SPRINT.UP;
+          S.fallT = 0;
+        }
+        S.dashHeld = true;
+        S.riseT = Math.min(SPRINT.UP, S.riseT + d);
+        S.prog = clamp5(S.riseT / SPRINT.UP, 0, 1);
+        S.amt = sprintEaseOut3(S.prog);
+        S.speed = WALK + span * S.amt;
+        S.accelPhase = S.prog >= 0.999 ? "top" : "accel";
+      } else {
+        // 回落：从松手瞬间的速度开始，smoothstep 让"先滑一段再收住"（惯性），
+        // 不是指数衰减那种"一松手就没速度了"
+        if (S.dashHeld) {
+          S.fallFrom = Math.max(S.speed, WALK);
+          S.fallProg = S.prog;
+          S.fallT = 0;
+        }
+        S.dashHeld = false;
+        S.fallT = Math.min(SPRINT.DOWN, S.fallT + d);
+        const k = sprintSmooth(S.fallT / SPRINT.DOWN);
+        S.prog = clamp5(S.fallProg * (1 - k), 0, 1);
+        S.amt = clamp5((Math.max(S.fallFrom, WALK) - WALK) / span, 0, 1) * (1 - k);
+        S.speed = WALK + span * S.amt;
+        if (S.speed - WALK < 1e-3) S.speed = WALK;
+        S.accelPhase = S.amt > 0.001 ? "decel" : "idle";
+      }
+      S.phase = S.prog >= SPRINT.PHASE_SPRINT ? "sprint" : S.prog >= SPRINT.PHASE_RUN ? "run" : "walk";
+      return S;
+    },
+    /** HOOKS.move：数值链 (cb,c,wish,dt,inp,cur) -> number */
+    moveHook(cb, c, wish, dt, inp, cur) {
+      const prev = typeof cur === "number" && isFinite(cur) ? cur : 1;
+      if (!c || c.side !== SIDE.GOJO || !c.ctrl || !c.ctrl.sprint) return prev;
+      this._cb = cb;
+      const S = c.ctrl.sprint;
+      const d = Math.max(Math.min(Number(dt) || 0, 0.05), 1e-4);
+      const dash = !!(wish && wish.dash);
+      this.update(S, dash, d);
+      S.cmdAge = 0;
+      const base = dash ? sprintTune("DASH_SPEED", 8.8) : sprintTune("MOVE_SPEED", 4.8);
+      // 返回倍率：最终速度 = base * moveMul * mul = S.speed * moveMul
+      return prev * (S.speed / Math.max(0.01, base));
+    },
+    /** HOOKS.locomotion：返回 true = 我们自己写了 c.ctrl.state.phase */
+    locomotion(cb, c, info) {
+      if (!c || c.side !== SIDE.GOJO || !c.ctrl || !c.ctrl.sprint) return false;
+      const S = c.ctrl.sprint;
+      S.cmdAge = 0;
+      if (c.ctrl.state) c.ctrl.state.phase = S.phase;
+      return true;
+    },
+    tick(cb, dt, t) {
+      this._cb = cb;
+      this.frame(dt, cb);
+    },
+    /**
+     * 每帧驱动：惯性衰减 + 实测速度 + 扬尘 + 脚步/风噪。
+     * 由 HOOKS.tick（战斗帧）与 camera.js 的 updateGodCam（渲染帧，一定每帧都跑）
+     * 双重调用，用 cb.frame 去重 —— 不去重的话衰减速率翻倍，起步曲线要 0.7s 才到顶速。
+     */
+    frame(dt, cb) {
+      cb = cb || this._cb;
+      if (!cb || !cb.fighters) return;
+      this._cb = cb;
+      if (this._stamp === cb.frame) return;
+      this._stamp = cb.frame;
+      const d = Math.max(Math.min(Number(dt) || 1 / 60, 0.05), 1 / 240);
+      const c = cb.fighters[SIDE.GOJO];
+      if (!c || !c.ctrl || !c.ctrl.sprint || !c.ctrl.root) return;
+      const S = c.ctrl.sprint;
+      const root = c.ctrl.root;
+      // 1) 本帧 move 钩子没被调用（玩家松开了方向键）→ 惯性衰减
+      S.cmdAge += d;
+      if (S.cmdAge > d * 1.6) this.update(S, false, d);
+      // 2) 实测位移速度（攻击减速 / 被击退时特效跟着掉，不会"站着还刮风"）
+      const px = root.position.x;
+      const pz = root.position.z;
+      let v = 0;
+      if (this._hasPos) v = Math.hypot(px - this._px, pz - this._pz) / d;
+      this._px = px;
+      this._pz = pz;
+      this._hasPos = true;
+      S.spdNow = clamp5(v, 0, 40);
+      // 3) 特效强度 = max(曲线强度, 实测速度归一)
+      const fromSpeed = clamp5((S.spdNow - 3.8) / 6.2, 0, 1);
+      const target = Math.max(S.amt, fromSpeed);
+      S.fx += (target - S.fx) * Math.min(1, d * 9);
+      if (S.fx < 1e-3) S.fx = 0;
+      // 4) 过弯压镜用的偏航角速度（camera.js 读 Sprint.turnRoll()）
+      let dy = root.rotation.y - this._yaw;
+      while (dy > Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      this._yaw = root.rotation.y;
+      const rollT = clamp5(-dy / d * 0.012, -0.05, 0.05) * S.fx;
+      S.turnLag += (rollT - S.turnLag) * Math.min(1, d * 8);
+      // 5) 扬尘 + 脚步：按步态相位判"踩地帧"（相位 0 与 0.5 各一次 = 左右脚）
+      const A = cb.audio || (typeof audio !== "undefined" ? audio : null);
+      const FX = cb.fx || (typeof fx !== "undefined" ? fx : null);
+      const dbg = c.ctrl.dbg;
+      const nm = dbg ? dbg.name : "";
+      const gait = nm === "walk" || nm === "run" || nm === "sprint";
+      if (gait && dbg && dbg.dur > 0 && S.fx > SPRINT.DUST_MIN && S.spdNow > 4.5) {
+        const p = dbg.t / dbg.dur;
+        const prevP = S.gaitP;
+        S.gaitP = p;
+        if (p < prevP && prevP > 0.05) this.footStrike(cb, c, FX, A, true);
+        else if (prevP < 0.5 && p >= 0.5) this.footStrike(cb, c, FX, A, false);
+      } else {
+        S.gaitP = 0;
+      }
+      // 6) 风噪：起步那一下"扑"一声 + 持续床音随速度爬升
+      if (S.gustArmed && S.fx > 0.42) {
+        S.gustArmed = false;
+        if (A && A.play) A.play("run_wind", { volume: 0.45 + 0.35 * S.fx });
+      }
+      if (S.fx < 0.12) S.gustArmed = true;
+      S.wind = S.fx;
+      if (A && A.runWind) {
+        if (Math.abs(S.fx - this._windSent) > 0.02 || (S.fx <= 0.001 && this._windSent > 0)) {
+          A.runWind(S.fx);
+          this._windSent = S.fx;
+        }
+      }
+    },
+    /** 一只脚踩地：脚骨世界坐标处的扬尘 + 脚步音（低画质降级为 1 颗粒子） */
+    footStrike(cb, c, FX, A, left) {
+      const S = c.ctrl.sprint;
+      const bones = c.ctrl.bones;
+      const bone = left ? bones.footL : bones.footR;
+      const p = sprintFootV;
+      try {
+        if (bone && bone.getWorldPosition) bone.getWorldPosition(p);
+        else p.set(c.ctrl.root.position.x, 0, c.ctrl.root.position.z);
+      } catch (e) {
+        p.set(c.ctrl.root.position.x, 0, c.ctrl.root.position.z);
+      }
+      const q = c.ctrl.quality;
+      const count = q === "low" ? 1 : q === "medium" ? 2 : 3;
+      if (FX && FX.debris) {
+        FX.debris({
+          pos: p,
+          count,
+          power: 1.6 + 2.8 * S.fx,
+          size: 0.17,
+          life: 0.55,
+          up: 0.45,
+          color: C.CONCRETE2
+        });
+        S.dust += count;
+      }
+      // 地面尘圈只在一只脚上生成（省池子容量），半径随速度涨
+      if (left && FX && FX.groundRing) {
+        FX.groundRing({
+          pos: p.clone().setY(0.02),
+          color: C.CONCRETE2,
+          color2: C.WHITE,
+          maxRadius: 0.85 + 0.75 * S.fx,
+          life: 0.26,
+          thickness: 0.09
+        });
+      }
+      if (A && A.play) {
+        A.play("step", { volume: 0.12 + 0.24 * S.fx, rate: 0.85 + 0.55 * S.fx });
+        S.steps++;
+      } else S.steps++;
+    },
+    /** 当前步态剪辑名（诊断用） */
+    animName() {
+      const cb = this._cb;
+      const c = cb && cb.fighters && cb.fighters[SIDE.GOJO];
+      return c && c.ctrl && c.ctrl.dbg ? c.ctrl.dbg.name : "";
+    },
+    /** camera.js 在算出最终 fov 之后回填，供 MECH_DEBUG 读（1 帧以内的偏差无意义） */
+    report(fovAdd, fovAbs) {
+      const S = this._S();
+      if (!S) return;
+      S.fov = fovAdd;
+      S.fovAbs = fovAbs;
+      S.blur = this.blur();
+    }
+  };
+  onHook("move", function (cb, c, wish, dt, inp, cur) {
+    return Sprint.moveHook(cb, c, wish, dt, inp, cur);
+  });
+  onHook("locomotion", function (cb, c, info) {
+    return Sprint.locomotion(cb, c, info);
+  });
+  onHook("tick", function (cb, dt, t) {
+    Sprint.tick(cb, dt, t);
+  });
+  onHook("combatInit", function (cb) {
+    Sprint.attach(cb);
+  });
+  onHook("reset", function (cb) {
+    Sprint.resetAll(cb);
+  });
+  /**
+   * 契约 §1.3 的自报状态：**字段名照抄**（speed/target/phase/fov/accelPhase/dust），
+   * 独立验证只读这里。fov = 本帧 FOV 附加量（度），另附 fovAbs = 相机 FOV 绝对值。
+   */
+  MECH_DEBUG.sprint = function () {
+    const S = Sprint._S();
+    if (!S) {
+      return { speed: SPRINT.WALK, target: SPRINT.WALK, phase: "walk", fov: 0, accelPhase: "idle", dust: 0, fovAbs: 0, spdNow: 0, wind: 0, blur: 0, steps: 0 };
+    }
+    return {
+      speed: +S.speed.toFixed(2),
+      target: +(S.dashHeld ? SPRINT.TOP : SPRINT.WALK).toFixed(2),
+      phase: S.phase,
+      fov: +S.fov.toFixed(2),
+      accelPhase: S.accelPhase,
+      dust: S.dust,
+      // ---- 以下为附加诊断字段（上面 6 个契约字段名未动）----
+      fovAbs: +S.fovAbs.toFixed(1),
+      spdNow: +S.spdNow.toFixed(2),
+      wind: +S.wind.toFixed(2),
+      blur: +S.blur.toFixed(3),
+      steps: S.steps,
+      anim: Sprint.animName()
+    };
+  };

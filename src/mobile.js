@@ -253,7 +253,8 @@ var MOBILE = (function () {
   /* ==========================================================================
      三、输入注入（合成键盘事件，与真实键盘同构）
      ========================================================================== */
-  var T = window.__TOUCH || (window.__TOUCH = { on: false, mx: 0, mz: 0, camX: 0, camY: 0 });
+  /* run：摇杆推到底 = 疾跑（契约 §7）。main.js 只读 mx/mz/camX/camY，run 是给探针/验收读的标志 */
+  var T = window.__TOUCH || (window.__TOUCH = { on: false, mx: 0, mz: 0, camX: 0, camY: 0, run: false });
   var KEY = {
     KeyJ: ["j", 74], KeyK: ["k", 75], KeyU: ["u", 85], KeyI: ["i", 73], KeyO: ["o", 79],
     KeyH: ["h", 72], KeyG: ["g", 71], KeyL: ["l", 76], KeyQ: ["q", 81],
@@ -308,7 +309,7 @@ var MOBILE = (function () {
   /* DOM 顺序 = 屏幕从左到右；「輕」在最后 = 最靠近右拇指 */
   var ACTIONS = [
     { act: "ult", cls: "t-ult", label: "二", hold: "KeyL", tip: "起手式：按住蓄力，松开放 200% 茈" },
-    { act: "dash", cls: "t-dash", label: "疾", tip: "疾走（点一下锁住）" },
+    { act: "dash", cls: "t-dash", label: "疾", tip: "疾走（点一下锁住 / 摇杆推到底）" },
     { act: "dodge", cls: "t-space", label: "閃", tip: "无下限 / 闪避" },
     { act: "heavy", cls: "t-k", label: "重", tip: "重击 / 踢击" },
     { act: "light", cls: "t-j", label: "輕", tip: "轻击（可三连段）" },
@@ -384,6 +385,8 @@ var MOBILE = (function () {
   var pinchPrev = 0;
   var stick = { active: false, cx: 0, cy: 0, R: 1, mx: 0, mz: 0 };
   var dashOn = false;
+  /* 摇杆推到底触发的疾跑（与 dash 按钮是"或"关系：按钮是开关，摇杆是瞬时） */
+  var stickRun = false;
   var lastInteraction = 0;
 
   var RE_CTRL = ".t-btn, .t-ubtn, .ab, .t-skip, .t-rbtn, .t-joy";
@@ -487,12 +490,28 @@ var MOBILE = (function () {
     knobEl.style.transform = "translate(-50%, -50%)";
     syncBridge();
   }
+  /**
+   * 触屏疾跑（契约 §7）：摇杆推到底（|摇杆| > 0.92）即疾跑。
+   * 实现方式是把模拟量阈值翻译成**真实的 Shift 按住**（keyDown/keyUp 合成长按）——
+   * 这样触屏和键盘走的是同一条速度曲线，不存在"手机上另一套疾跑"的分叉；
+   * window.__TOUCH.run 只是给探针/验收读的标志位。
+   * 放在 syncBridge 里而不是 moveStick 里：__MOBILE.drive() 直接写模拟量的验收脚本
+   * 也能触发疾跑（不必真的拖手指）。
+   */
+  function setStickRun(on) {
+    if (on === stickRun) return;
+    stickRun = on;
+    if (on) holdKey("ShiftLeft", true);
+    else if (!dashOn) holdKey("ShiftLeft", false);
+  }
   function syncBridge() {
     T.on = !!(isTouch && stick.active);
     T.mx = stick.mx;
     T.mz = stick.mz;
     T.camX = 0;   // 镜头旋转由本模块直接写 cam.yaw/pitch，手感更跟手
     T.camY = 0;
+    setStickRun(T.on && Math.hypot(T.mx, T.mz) > 0.92);
+    T.run = stickRun;
   }
 
   function startButton(e, el) {
@@ -1106,6 +1125,8 @@ var MOBILE = (function () {
     get touch() { return isTouch; },
     get dbg() { return dbg; },
     get dash() { return dashOn; },
+    /** 摇杆推到底触发的疾跑（与 dash 拨钮分开报告，验收要分别量） */
+    get run() { return stickRun; },
     audit: audit,
     toast: toast,
     setScale: function (s) { perf.scale = Math.max(0.5, Math.min(1, +s || 1)); applyPerfTargets("手动"); },

@@ -2954,6 +2954,14 @@
         if (!on) delete cb.hinted[kind];
       },
       /* ---- 只读诊断口：探针/机制模块用它读主循环内部状态 ---- */
+      /** 领域系统（机制模块替换的 clash 实例挂在 cb.domains.clash 上） */
+      get domains() {
+        return cb.domains;
+      },
+      /** 宿傩 AI（phase / difficulty / damageMul） */
+      get ai() {
+        return cb.ai;
+      },
       get frame() {
         return cb.frame;
       },

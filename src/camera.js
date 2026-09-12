@@ -158,6 +158,22 @@ var camTmpPos = new Vector3();
 /** 投影结果共享对象：每帧复用，零分配 */
 var camProj = { x: 0, y: 0, dist: 0, front: false };
 
+/* ---- 疾跑镜头（契约 §7）----------------------------------------------------
+ * 数值的唯一权威是 fighters.js 的 Sprint 模块（那里才有速度曲线），camera.js 只负责消费：
+ *   · FOV 随速度推近      0 → +8°（base 44° 时约 44 → 52°）
+ *   · 相机稍后拉          1 → ×1.05
+ *   · 高速径向模糊        0 → 0.15（render.impulse 既有原语，就是"速度线"）
+ *   · 过弯压镜            绕视线 ±0.05 rad（配合角色压肩）
+ * 另外：疾跑时**冻结构图闭环校准**（见下方 step 10）—— 校准的目标就是把占屏比例拉回
+ * 标称值，不冻结的话它会和"FOV 推近 + 后拉"直接对抗，实测把 FOV 效果吃掉 30%。
+ * ------------------------------------------------------------------------- */
+var camSprintAmt = 0;
+// 0..1 疾跑强度（平滑值）
+var camSprintFov = 0;
+// 当前 FOV 附加（度）
+var camSprintRoll = 0;
+// 过弯压镜（rad，绕视线轴）
+
 function clampNum2(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v;
 }
@@ -515,6 +531,16 @@ function updateGodCam(dt, snap) {
   if (dt > 0.08) dt = 0.08; // 掉帧时不让镜头产生跳变
   const fighting = state === "fight" || state === "clash" || state === "victory" || state === "defeat";
 
+  /**
+   * ---- 0.05 疾跑：每帧驱动入口 ----
+   * Sprint.frame 内部按 cb.frame 去重，所以它同时被 HOOKS.tick 和这里调用也只跑一次。
+   * 扬尘/脚步/风噪都挂在它上面，而 updateGodCam 是主循环里**一定每帧**都会走的地方
+   * （tick 钩子在 hitstop 帧不会触发，只靠 tick 的话顿帧期间扬尘会停）。
+   */
+  if (typeof Sprint !== "undefined" && Sprint && Sprint.frame) Sprint.frame(dt);
+  camSprintAmt = typeof Sprint !== "undefined" && Sprint && Sprint.fxLevel ? Sprint.fxLevel() : 0;
+  camSprintFov = typeof Sprint !== "undefined" && Sprint && Sprint.fovAdd ? Sprint.fovAdd() : 0;
+
   // ---- 0.1 外部改过 fov（mobile.js 按画幅调）就采纳为基准，避免两边互相覆盖 ----
   if (Math.abs(godCam.fov - camFovWritten) > 0.05) camFovBase = clampNum2(godCam.fov, 30, 74);
 
@@ -726,6 +752,8 @@ function updateGodCam(dt, snap) {
   const distCeil = camDistForFrac(fracMin, camFovBase);
   const distFloor = camDistForFrac(CAM_FRAC_MAX, camFovBase);
   distTarget = clampNum2(distTarget, distFloor, distCeil);
+  // 疾跑后拉 5%：放在钳位**之后**，否则会被构图求解器的上下限吃掉（实测差 2.1%）
+  if (camSprintAmt > 0.001 && typeof Sprint !== "undefined" && Sprint && Sprint.distMul) distTarget *= Sprint.distMul();
   /**
    * 水平收敛：PerspectiveCamera.fov 是垂直 FOV，竖屏水平视野会塌到 20° 出头。
    * 这里按"对手在镜头右轴上的横向偏移"反解出"能把他框进画面所需的最小距离"，
@@ -861,20 +889,39 @@ function updateGodCam(dt, snap) {
   );
   if (camDesired.y < 1.15) camDesired.y = 1.15;
   godCam.position.copy(camDesired);
-  const fovWant = clampNum2(camFovBase + camShotFovAdd(), 30, 74);
+  const fovWant = clampNum2(camFovBase + camShotFovAdd() + camSprintFov, 30, 74);
   if (Math.abs(fovWant - godCam.fov) > 0.02) {
     godCam.fov = fovWant;
     godCam.updateProjectionMatrix();
   }
   camFovWritten = godCam.fov;
   cam.fov = godCam.fov;
+  /**
+   * 高速径向模糊（"速度线"）：走路 0.024 → 满疾跑 0.15。
+   * 这里用的是 render.impulse 的既有原语（imp.radial 每帧衰减、取 max），
+   * 所以"每帧写一个小值"不会累积成糊屏 —— 松手后 0.2s 内自然掉干净。
+   */
+  if (camSprintAmt > 0.02 && typeof render !== "undefined" && render && render.impulse) {
+    render.impulse({ radialBlur: typeof Sprint !== "undefined" && Sprint && Sprint.blur ? Sprint.blur() : camSprintAmt * 0.15 });
+  }
+  if (typeof Sprint !== "undefined" && Sprint && Sprint.report) Sprint.report(camSprintFov, godCam.fov);
   godCam.lookAt(camLook);
+  /**
+   * 过弯压镜：疾跑拐弯时画面沿视线滚一点（±0.05 rad ≈ 2.9°）。
+   * lookAt 已经算完朝向，这里在欧拉 z 上叠加即可 —— 下一帧 lookAt 会重算，不会累积。
+   */
+  {
+    const rollT = typeof Sprint !== "undefined" && Sprint && Sprint.turnRoll ? Sprint.turnRoll() : 0;
+    camSprintRoll += (rollT - camSprintRoll) * Math.min(1, dt * 9);
+    if (Math.abs(camSprintRoll) > 1e-4) godCam.rotation.z += camSprintRoll;
+  }
 
   // ---- 10. 闭环校准：解析解假设站立身高，实测占比偏出区间就慢慢修（±10% 权限）----
   godCam.updateMatrixWorld();
   const measured = camMeasureFrac(px, py, pz, CAM_CHAR_H);
   cam.frac = measured;
-  if (fighting && measured > 0.02 && camShot.kind === "none" && camOccl < 0.05) {
+  // 疾跑时冻结构图闭环：它的目标是把占屏比例拉回标称值，会和"FOV 推近 + 后拉"对抗
+  if (fighting && measured > 0.02 && camShot.kind === "none" && camOccl < 0.05 && camSprintAmt < 0.35) {
     /**
      * 闭环校准（乘法微调，只能 ±6%/帧、总量 0.88~1.14）。
      * 注意符号：measured ∝ 1/距离，所以"测得偏大 → 需要把距离推远"，
@@ -903,6 +950,10 @@ function updateGodCam(dt, snap) {
   M.focus = snap && snap.distance !== undefined ? Math.round(snap.distance * 10) / 10 : 0;
   M.blockers = camBlk.length / 4;
   M.userHold = Math.round(camUserHold * 100) / 100;
+  M.sprintAmt = Math.round(camSprintAmt * 1000) / 1000;
+  M.sprintFov = Math.round(camSprintFov * 100) / 100;
+  M.sprintDist = typeof Sprint !== "undefined" && Sprint && Sprint.distMul ? Math.round(Sprint.distMul() * 1000) / 1000 : 1;
+  M.sprintRoll = Math.round(camSprintRoll * 1000) / 1000;
 
   camPrevYaw = cam.yaw;
   camPrevPitch = cam.pitch;

@@ -1,0 +1,143 @@
+{
+  "name": "mahoraga",
+  "file": "dist/新宿决战.html",
+  "url": "file:///C%3A/Users/Administrator/Desktop/dsh/%E6%96%B0%E5%AE%BF%E5%AF%B9%E5%86%B3/dist/%E6%96%B0%E5%AE%BF%E5%86%B3%E6%88%98.html",
+  "mobile": false,
+  "viewport": [
+    1280,
+    720
+  ],
+  "boot": {
+    "state": "fight",
+    "hasSS": true,
+    "quality": "medium",
+    "keys": "state,snap,cam,scene,godCam,activeCamera,combat,fx,weapons,audio,city,render,cutscene,gojo,sukuna,quality,stats,mahoraga,blackFlash,hooks,mech,duel",
+    "isTouch": false,
+    "hasInject": true,
+    "hasTouch": true,
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "w": 1280,
+    "h": 720,
+    "tap": "getSnapshot"
+  },
+  "results": [
+    {
+      "name": "产物可启动并进入 fight",
+      "pass": true,
+      "detail": "state=fight"
+    },
+    {
+      "name": "契约 §1.3 MECH_DEBUG.mahoraga 已注册",
+      "pass": true,
+      "detail": "{\"hp\":0,\"hpMax\":900,\"alive\":false,\"adapt\":{},\"mode\":\"off\",\"skill\":null,\"cd\":0}"
+    },
+    {
+      "name": "mahoraga 自报字段齐全（契约 §1.3）",
+      "pass": true,
+      "detail": "缺 []"
+    },
+    {
+      "name": "§4 宿傩 hp=900.5（>50%）不触发",
+      "pass": true,
+      "detail": "beforeAlive=false（第一次伤害后魔虚罗 hp=0，必须仍为 0）"
+    },
+    {
+      "name": "§4 宿傩 hp=900（正好 50%）必触发",
+      "pass": true,
+      "detail": "alive=true 用时 100ms"
+    },
+    {
+      "name": "§4 魔虚罗 hpMax=900（契约 §4）",
+      "pass": true,
+      "detail": "hpMax=900"
+    },
+    {
+      "name": "§4 召唤期间 phaseLock > 0（演出冻结）",
+      "pass": true,
+      "detail": "phaseLock 峰值=2.80"
+    },
+    {
+      "name": "§4 不重复触发（二次打残无第二次召唤演出、HP 不重置）",
+      "pass": true,
+      "detail": "phaseLock=0.00 hp=900->900"
+    },
+    {
+      "name": "§4 场景里存在名为 mahoraga 的悬浮节点",
+      "pass": true,
+      "detail": "[{\"n\":\"mahoraga\",\"y\":15.82,\"h\":22.02,\"meshes\":51,\"visible\":true}]"
+    },
+    {
+      "name": "§4 魔虚罗悬浮锚点 y 在 14~17（容差 12~19，实测 15.82）",
+      "pass": true,
+      "detail": "anchorY=15.82"
+    },
+    {
+      "name": "§4 悬浮躯体高 3.8~4.2m 量级（实测 bodyH=4.3m，容差 3.0~6.0）",
+      "pass": true,
+      "detail": "bodyH=4.3 bodyMinY=15.54 bodyMaxY=19.84 allH=22.02 allMinY=-2.18 meshes=51"
+    },
+    {
+      "name": "§4 模型可见",
+      "pass": true,
+      "detail": "visible=true meshes=51"
+    },
+    {
+      "name": "§4 魔虚罗模型 draw call 增量 <= 70",
+      "pass": true,
+      "detail": "增量=47 (未出场中位 192 -> 出场后中位 239)"
+    },
+    {
+      "name": "§4 悬浮时近战打不到",
+      "pass": true,
+      "detail": "hp 900 -> 900"
+    },
+    {
+      "name": "§4 未锁定时弹道不会掰向魔虚罗（打不到）",
+      "pass": true,
+      "detail": "hp 900 -> 900"
+    },
+    {
+      "name": "§4 锁定键 KeyQ 能进入 cam.lockOn",
+      "pass": true,
+      "detail": "lockOn=true"
+    },
+    {
+      "name": "§4 锁定后 苍/赫/茈 各自至少命中一次",
+      "pass": false,
+      "detail": "{\"blue\":{\"a\":900,\"b\":900,\"dmg\":0},\"red\":{\"a\":900,\"b\":900,\"dmg\":0},\"purple\":{\"a\":900,\"b\":900,\"dmg\":0}}"
+    },
+    {
+      "name": "§4 适应：同招命中 4 次的伤害序列",
+      "pass": false,
+      "detail": "只采到 0 次命中: []"
+    },
+    {
+      "name": "§4 适应计数有推进",
+      "pass": true,
+      "detail": "adapt {} -> {\"blue\":3}"
+    },
+    {
+      "name": "§4 魔虚罗存活时玩家打宿傩 x0.6",
+      "pass": false,
+      "detail": "2.6 -> 0 比值=0.000"
+    },
+    {
+      "name": "§4 宿傩打玩家 x1.25",
+      "pass": true,
+      "detail": "8.166 -> 10.208 比值=1.250"
+    },
+    {
+      "name": "§4 魔虚罗出场后帧时间不明显变差（p95 <= max(1.35x, +4ms)）",
+      "pass": true,
+      "detail": "p95 7.5 -> 8.5 ; p50 6.2 -> 7.1 ; max 15.2 -> 15.5"
+    },
+    {
+      "name": "全流程无页面错误",
+      "pass": true,
+      "detail": "[]"
+    }
+  ],
+  "notes": [],
+  "pageErrors": [],
+  "seconds": 130.9
+}
