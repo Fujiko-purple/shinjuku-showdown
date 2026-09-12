@@ -172,7 +172,7 @@ var MAIN = (function () {
     var st = world.state();
     view.update(st, evs, dt);
     view.render();
-    HUD.update(hud, st, evs, dt, { time: stats.time });
+    HUD.update(hud, st, evs, dt, { time: stats.time, mode: mode });
     requestAnimationFrame(frame);
   }
   /** 事件 → 音效 + 统计 + 模式切换（表现层的事，逻辑层不管） */

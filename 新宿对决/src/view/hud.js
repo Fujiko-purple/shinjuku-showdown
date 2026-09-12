@@ -50,6 +50,13 @@ var HUD = {
   },
   update: function (h, st, evs, dt, extra) {
     var a = st.fighters[0], b = st.fighters[1];
+    var inResult = !!(extra && extra.mode === "result");
+    if (inResult) {
+      /** 结算时把战斗内提示全部收掉：否则"架势崩坏/按 K 处决"会压在"胜利"标题上（截图实测） */
+      if (h.msgT > 0) { h.msg.innerHTML = ""; h.msgT = 0; }
+      h.combo.textContent = "";
+      h.maho.classList.remove("on", "danger");
+    }
     function setSide(s, f) {
       s.hp.style.transform = "scaleX(" + Math.max(0, f.hp / f.hpMax).toFixed(3) + ")";
       s.ce.style.transform = "scaleX(" + Math.max(0, f.ce / f.ceMax).toFixed(3) + ")";
@@ -64,14 +71,14 @@ var HUD = {
     h.dist.textContent = st.dist.toFixed(1) + "m";
     h.dist.style.color = st.dist > 12 ? "#7b8aa8" : "#5ff0ff";
     // 魔虚罗：只有适应进度，没有血条
-    if (st.maho && st.maho.alive) {
+    if (!inResult && st.maho && st.maho.alive) {
       h.maho.classList.add("on");
       var ad = Math.max(st.maho.adapt.melee, st.maho.adapt.skill);
       h.mahoBar.style.transform = "scaleX(" + ad.toFixed(3) + ")";
       h.mahoBar.style.background = ad >= 1 ? "#ff2b1e" : "#ffd873";
       h.mahoV.textContent = "适应 " + Math.round(ad * 100) + "%" + (st.maho.state === "adapting" ? " · 可打断！" : st.maho.state === "down" ? " · 落地" : "");
       h.maho.classList.toggle("danger", st.maho.state === "adapting");
-    } else h.maho.classList.remove("on", "danger");
+    } else if (!inResult) h.maho.classList.remove("on", "danger");
     // 连段
     h.combo.textContent = a.combo > 1 ? a.combo + " 连击" : "";
     // 事件提示（同一时刻只留一条 —— 画面可读性预算）
