@@ -3,10 +3,13 @@
   "core/input.js",
   "core/events.js",
   "core/loop.js",
+  "data/moves.js",
   "data/characters.js",
   "sim/hit.js",
   "sim/world.js",
+  "view/audio.js",
   "view/scene.js",
   "view/hud.js",
+  "view/screens.js",
   "main.js"
 ]
