@@ -1,101 +1,267 @@
 /**
- * build/build.mjs —— 根构建入口（2026-09-13 起改为「构建新项目」）
+ * build.mjs —— 新宿决战构建脚本
  * ----------------------------------------------------------------------------
- * 为什么要有这一层：Cloudflare Pages 是 Git 集成的，它的构建命令指向**这个文件**、
- * 输出目录是 dist/site。新项目在 新宿对决/ 下自己构建，所以要在这里把产物搬到
- * dist/site —— 这样"推送到 GitHub = 自动上线新版"这条链路不用改任何线上配置。
+ * 一次构建产出两份可交付物：
  *
- *   node build/build.mjs              构建新项目 -> dist/site（Pages 用的就是这个）
- *   node build/build.mjs --legacy     旧版 demo 的构建（保留但默认不跑，仅供对照）
+ *   1) dist/新宿决战.html   单文件版：JS/CSS 全内联，双击即开（离线也能听 BGM）。
  *
- * 另外会写一个"自毁 Service Worker"：旧站的 sw.js 会把外壳缓存住，
- * 不清掉的话老玩家会一直看到旧版（这是真实踩过的坑）。
+ *   2) dist/site/           可静态托管的站点版，首屏体积最小化：
+ *                            index.html              入口（全相对路径，放 CDN 子目录也能跑）
+ *                            assets/three.js         three.js r160
+ *                            assets/game.js          游戏代码（11 个模块顺序拼接）
+ *                            assets/styles.css       基础样式
+ *                            assets/mobile.css       移动端样式
+ *                            assets/bgm.m4a          2.7MB 音频，首次交互后才加载
+ *                            manifest.webmanifest    PWA 清单（可加主屏，横屏全屏）
+ *                            sw.js                   离线缓存
+ *                            icons/*.png             192/512/180 图标（自己生成，无依赖）
+ *                            robots.txt  _headers  404.html
+ *
+ * 设计要点：
+ *   - 模块顺序 = src/manifest.json；src/mobile.js 若没写进 manifest 会自动接在最后
+ *     （它要调用 main.js 的顶层函数，必须最后执行）。
+ *   - src/head.html 与 src/body.html 是别人的写域，构建只改写「产物」，不动源文件。
+ *   - 站点版把内联 base64 音频抽成外部文件 + 首次交互懒加载，首屏从 5.63MB 降到 ~2MB。
  */
-import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync } from "node:fs";
-import { join, dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, rmSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
+import { deflateSync } from 'node:zlib';
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const NEW = join(ROOT, "新宿对决");
-const OUT = join(ROOT, "dist", "site");
-const legacy = process.argv.includes("--legacy");
+const ROOT = process.cwd();
+const SRC = join(ROOT, 'src');
+const DIST = join(ROOT, 'dist');
+/**
+ * --site-out <目录>：把站点产物写到别处（默认 dist/site）。
+ * 配合 --out 用，可以在不碰任何共享产物的前提下做一次完整私有构建：
+ *   node build/build.mjs --out tmp/me/dist.html --site-out tmp/me/site
+ * 多人并行时优先用这个，不必去抢 _tools/.buildlock。
+ */
+const siteOutIdx = process.argv.indexOf('--site-out');
+const SITE = siteOutIdx >= 0 && process.argv[siteOutIdx + 1] ? resolve(process.argv[siteOutIdx + 1]) : join(DIST, 'site');
+const SHELL = join(ROOT, 'deploy', 'site-shell');
 
-/** 手写递归复制（原因见下面 cpSync 的注释） */
-function copyDir(src, dst) {
-  mkdirSync(dst, { recursive: true });
-  for (const ent of readdirSync(src, { withFileTypes: true })) {
-    const s = join(src, ent.name), d = join(dst, ent.name);
-    if (ent.isDirectory()) copyDir(s, d);
-    else writeFileSync(d, readFileSync(s));
+const read = (p) => readFileSync(p, 'utf8');
+const exists = (p) => existsSync(p);
+const manifest = JSON.parse(read(join(SRC, 'manifest.json')));
+
+/* ---------- 1. 读源 ---------- */
+const head = read(join(SRC, 'head.html'));
+const styles = read(join(SRC, 'styles.css'));
+const mobileCss = exists(join(SRC, 'mobile.css')) ? read(join(SRC, 'mobile.css')) : '';
+const afterStyle = read(join(SRC, 'after-style.html'));
+const body = read(join(SRC, 'body.html'));
+const prefix = read(join(SRC, '_script-prefix.js'));
+const vendor = read(join(SRC, 'vendor.three.js'));
+
+/** 模块顺序：manifest + 自动补 mobile.js（永远最后） */
+const EXTRA_LAST = ['mobile.js'];
+const moduleNames = manifest.modules.slice();
+for (const n of EXTRA_LAST) if (exists(join(SRC, n)) && !moduleNames.includes(n)) moduleNames.push(n);
+/**
+ * --lenient：允许 manifest 里声明了但还没落地的模块（队友正在写的新文件）暂时缺失。
+ * 默认是硬失败 —— 构建产物不允许悄悄少一块。开发中间态可以加 --lenient 继续跑。
+ */
+const LENIENT = process.argv.includes('--lenient') || process.argv.includes('-l');
+const missing = [];
+const modules = [];
+for (const name of moduleNames) {
+  const p = join(SRC, name);
+  if (!exists(p)) {
+    if (!LENIENT) throw new Error('缺少模块: ' + name + '（开发中间态可用 --lenient 跳过）');
+    missing.push(name);
+    console.warn('⚠ 跳过缺失模块: ' + name + '（--lenient）');
+    continue;
   }
+  modules.push({ name, code: read(p) });
 }
 
-function run(cmd, args, cwd) {
-  /**
-   * ⚠ 不要开 shell:true —— Windows 上 node 的绝对路径含空格（C:Program Files
-odejs
-ode.exe），
-   * 走 cmd.exe 会被拆成两段（踩过一次）。
-   */
-  const r = spawnSync(cmd, args, { cwd: cwd || ROOT, stdio: "inherit" });
-  if (r.status !== 0) { console.error("BUILD 失败: " + cmd + " " + args.join(" ")); process.exit(r.status === null ? 1 : r.status); }
+/* ---------- 2. 拼代码 ---------- */
+/** 模块文件自带的首行注释（如 "// src/camera.js"）与构建器插入的分隔注释重复，
+ *  统一剥掉，避免产物里出现两行同名注释、也让切分工具不会丢模块首行。 */
+function stripSelfMarker(name, code) {
+  const re = new RegExp('^[ \t]*//[ \t]*src/' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[ \t]*\r?\n');
+  return code.replace(re, '');
+}
+const modulesClean = modules.map((m) => ({ name: m.name, code: stripSelfMarker(m.name, m.code) }));
+const gameCode = modulesClean.map((m) => '  // src/' + m.name + '\n' + m.code).join('\n');
+const scriptBody = [prefix, vendor, gameCode].join('\n');
+const styleBody = mobileCss ? styles + '\n' + mobileCss : styles;
+
+/* ---------- 3. 单文件版 ----------
+   --out <路径>：把单文件产物写到别处（多人并行时不互相覆盖 dist/新宿决战.html）。
+   站点版目录始终是 dist/site/（要独立目录请整体拷贝）。 */
+const outArgIdx = process.argv.indexOf('--out');
+const outHtml = outArgIdx >= 0 && process.argv[outArgIdx + 1]
+  ? resolve(process.argv[outArgIdx + 1])
+  : join(DIST, '新宿决战.html');
+mkdirSync(dirname(outHtml), { recursive: true });
+mkdirSync(DIST, { recursive: true });
+writeFileSync(outHtml,
+  head.trimEnd() + '\n' +
+  '<style>\n' + styleBody + '\n</style>\n' +
+  (afterStyle ? afterStyle.trimEnd() + '\n' : '</head>\n') +
+  body.trimEnd() + '\n\n' +
+  '<script>\n' + scriptBody + '\n\n</script>\n' +
+  '</body>\n</html>\n');
+
+/* ---------- 4. 站点版 ---------- */
+if (exists(SITE)) rmSync(SITE, { recursive: true, force: true });
+const SITE_ASSETS = join(SITE, 'assets');
+mkdirSync(SITE_ASSETS, { recursive: true });
+/**
+ * ⚠ 站点版不能把 three.js 拆成独立文件：
+ *   vendor.three.js 依赖 _script-prefix.js 里的 __defProp/__export，
+ *   而这两个帮助函数和整个 IIFE 的作用域无法跨 <script> 共享（实测：
+ *   ReferenceError: __export is not defined）。
+ *   所以 game.js = 前缀 + three.js + 游戏模块，和单文件版是同一段代码。
+ */
+writeFileSync(join(SITE_ASSETS, 'game.js'), scriptBody);
+writeFileSync(join(SITE_ASSETS, 'styles.css'), styles);
+if (mobileCss) writeFileSync(join(SITE_ASSETS, 'mobile.css'), mobileCss);
+
+/* 4a. 把 body.html 里的内联 base64 音频抽成独立文件
+   @多首 BGM：每个 <audio id="x" ... src="data:audio/..."> 都会抽成 assets/x.m4a
+   （第一首沿用历史上的 bgm.m4a 名字，避免动到既有的懒加载器与缓存键）。
+   站点版只在玩家首次交互后才下载**当前选中**的那一首，切换时才按需拉另一首。 */
+const audioSrcRe = /<audio\s+id="([^"]+)"([^>]*?)src="data:audio\/([a-z0-9]+);base64,([A-Za-z0-9+/=]+)"/gi;
+const audioList = [];
+let am;
+while ((am = audioSrcRe.exec(body))) {
+  const id = am[1];
+  const ext = am[3] === 'mp4' ? 'm4a' : am[3];
+  const buf = Buffer.from(am[4], 'base64');
+  const name = audioList.length === 0 ? ('bgm.' + ext) : (id + '.' + ext);
+  writeFileSync(join(SITE_ASSETS, name), buf);
+  audioList.push({ id, file: 'assets/' + name, bytes: buf.length, raw: am[0], mid: am[2] });
+}
+const audioInfo = audioList.length
+  ? { file: audioList[0].file, bytes: audioList[0].bytes, all: audioList.map((a) => ({ id: a.id, file: a.file, bytes: a.bytes })) }
+  : null;
+
+/* 4b. 产物 HTML：音频外链化 + 清掉单文件标记 + 插入懒加载器与 PWA 头 */
+function siteBody() {
+  let b = body;
+  for (const a of audioList) {
+    // 保留 id / loop 等属性，只把内联的 src 换成 data-src 交给懒加载器；
+    // 同时把原来的 preload="auto" 收掉（否则标签上会同时出现两个 preload，浏览器取第一个）。
+    b = b.replace(a.raw, '<audio id="' + a.id + '"' + a.mid.replace(/\s*preload="[^"]*"/i, '') + 'preload="none" data-src="' + a.file + '"');
+  }
+  b = b.replace('window.__SS_SINGLE_FILE = true;', 'window.__SS_SINGLE_FILE = false;');
+  return b.trimEnd();
+}
+const siteHtml =
+  head.trimEnd() + '\n' +
+  read(join(SHELL, 'head-extra.html')) +
+  (afterStyle ? afterStyle.trimEnd() + '\n' : '</head>\n') +
+  siteBody() + '\n\n' +
+  read(join(SHELL, 'lazy-audio.html')) + '\n' +
+  /* sw-register.html：此前 sw.js 被生成却没有任何地方注册它（Lead 验收时发现，实测 getRegistrations() 为空） */
+  read(join(SHELL, 'sw-register.html')) + '\n' +
+  '<script src="assets/game.js"></script>\n' +
+  '</body>\n</html>\n';
+writeFileSync(join(SITE, 'index.html'), siteHtml);
+
+/* 4c. PWA 图标：自己写的极简 PNG 编码器，不引第三方依赖 */
+function crc32(buf) {
+  let c, crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) {
+    c = (crc ^ buf[i]) & 0xff;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    crc = (crc >>> 8) ^ c;
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+function chunk(type, data) {
+  const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+  const t = Buffer.from(type, 'ascii');
+  const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(Buffer.concat([t, data])));
+  return Buffer.concat([len, t, data, crc]);
+}
+function pngRGBA(w, h, px) {
+  const raw = Buffer.alloc((w * 4 + 1) * h);
+  for (let y = 0; y < h; y++) {
+    raw[y * (w * 4 + 1)] = 0;
+    px.copy(raw, y * (w * 4 + 1) + 1, y * w * 4, (y + 1) * w * 4);
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8; ihdr[9] = 6;
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw, { level: 9 })), chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+/** 图标：漆黒底 + 紫环 + 青点（与内联 favicon 同款），2x2 超采样抗锯齿 */
+function makeIcon(size) {
+  const px = Buffer.alloc(size * size * 4);
+  const S = 2, cx = size / 2, cy = size / 2;
+  const R1 = size * 0.30, RW = size * 0.058, RD = size * 0.105;
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    let r = 0, g = 0, b = 0, a = 0;
+    for (let sy = 0; sy < S; sy++) for (let sx = 0; sx < S; sx++) {
+      const X = x + (sx + 0.5) / S, Y = y + (sy + 0.5) / S;
+      const d = Math.hypot(X - cx, Y - cy);
+      let cr = 0x06, cg = 0x06, cb = 0x0c;
+      if (Math.abs(d - R1) < RW / 2) { cr = 0xb0; cg = 0x4c; cb = 0xff; }
+      if (d < RD) { cr = 0x5f; cg = 0xf0; cb = 0xff; }
+      const edge = Math.min(1, Math.max(0, (size * 0.5 - d) / 1.6));
+      r += cr * edge; g += cg * edge; b += cb * edge; a += edge;
+    }
+    const n = S * S, i = (y * size + x) * 4;
+    px[i] = Math.round(r / n); px[i + 1] = Math.round(g / n);
+    px[i + 2] = Math.round(b / n); px[i + 3] = Math.round((a / n) * 255);
+  }
+  return pngRGBA(size, size, px);
+}
+mkdirSync(join(SITE, 'icons'), { recursive: true });
+for (const [s, name] of [[192, 'icon-192.png'], [512, 'icon-512.png'], [180, 'apple-touch-icon.png']]) {
+  writeFileSync(join(SITE, 'icons', name), makeIcon(s));
 }
 
-console.log("▸ 构建新项目（新宿对决/）");
-run(process.execPath, [join(NEW, "build", "build.mjs")]);
+/* 4d. PWA 清单 + Service Worker */
+const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+const shellList = ['./', 'index.html', 'assets/styles.css', 'assets/mobile.css', 'assets/game.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
+writeFileSync(join(SITE, 'manifest.webmanifest'), JSON.stringify({
+  name: '新宿决战 · 五条悟 VS 宿傩',
+  short_name: '新宿决战',
+  description: '非商业同人 3D 格斗，手机浏览器直接开玩',
+  lang: 'zh-CN',
+  start_url: './',
+  scope: './',
+  display: 'fullscreen',
+  display_override: ['fullscreen', 'standalone', 'minimal-ui'],
+  orientation: 'landscape',
+  background_color: '#06060c',
+  theme_color: '#06060c',
+  categories: ['games'],
+  icons: [
+    { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+    { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+    { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+  ],
+}, null, 2));
+writeFileSync(join(SITE, 'sw.js'),
+  read(join(SHELL, 'sw.template.js'))
+    .replace(/__STAMP__/g, stamp)
+    .replace('__SHELL__', JSON.stringify(shellList, null, 2)));
+for (const f of ['robots.txt', '_headers', '404.html']) writeFileSync(join(SITE, f), read(join(SHELL, f)));
 
-console.log("▸ 同步产物到 dist/site（Cloudflare Pages 的输出目录）");
-try {
-  const SRC = join(NEW, "dist", "site");
-  if (!existsSync(SRC)) throw new Error("源目录不存在: " + SRC);
-  rmSync(OUT, { recursive: true, force: true });
-  /**
-   * ⚠ 不要用 fs.cpSync：在这台 Windows 上对含中文的路径会直接把 node 进程打崩
-   * （exit 0xC0000409 STATUS_STACK_BUFFER_OVERRUN，实测）。手写递归复制最稳，Linux 上也一样跑。
-   */
-  copyDir(SRC, OUT);
-  console.log("  已复制 " + readdirSync(OUT).length + " 个顶层条目");
-} catch (e) {
-  console.error("同步失败:", (e && e.stack) || e);
-  process.exit(1);
-}
-
-/** 自毁 SW：清缓存 + 注销自己 + 让所有客户端刷新到新版 */
-writeFileSync(join(OUT, "sw.js"), [
-  "// 自毁 Service Worker：旧站缓存必须清掉，否则老玩家会一直看到旧版",
-  "self.addEventListener('install', function (e) { self.skipWaiting(); });",
-  "self.addEventListener('activate', function (e) {",
-  "  e.waitUntil((async function () {",
-  "    try {",
-  "      var keys = await caches.keys();",
-  "      await Promise.all(keys.map(function (k) { return caches.delete(k); }));",
-  "      await self.registration.unregister();",
-  "      var cs = await self.clients.matchAll();",
-  "      cs.forEach(function (c) { c.navigate(c.url); });",
-  "    } catch (err) {}",
-  "  })());",
-  "});"
-].join("\n"));
-
-/** 让老玩家浏览器里的 sw.js 主动更新 */
-const idx = join(OUT, "index.html");
-writeFileSync(idx, readFileSync(idx, "utf8").replace(
-  "</body>",
-  '<script>if("serviceWorker" in navigator){try{navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){r.update();});}).catch(function(){});}catch(e){}}</script>\n</body>'
-));
-
-if (legacy) {
-  console.log("▸ 旧版 demo 构建（--legacy）");
-  if (existsSync(join(ROOT, "旧版备份", "build.mjs"))) run(process.execPath, [join(ROOT, "旧版备份", "build.mjs")]);
-  else console.log("  （旧版构建脚本未保留，跳过）");
-}
-
-const bytes = (p) => { try { return readFileSync(p).length; } catch (e) { return 0; } };
+/* ---------- 5. 构建报告 ---------- */
+const bytes = (p) => statSync(p).size;
+const firstPaintFiles = ['index.html', 'assets/game.js', 'assets/styles.css']
+  .concat(mobileCss ? ['assets/mobile.css'] : []);
+const firstPaint = firstPaintFiles.reduce((s, f) => s + bytes(join(SITE, f)), 0);
 console.log(JSON.stringify({
-  输出: OUT,
-  index: (bytes(join(OUT, "index.html")) / 1024).toFixed(1) + "KB",
-  game: (bytes(join(OUT, "assets", "game.js")) / 1024).toFixed(0) + "KB",
-  three: (bytes(join(OUT, "assets", "three.js")) / 1024).toFixed(0) + "KB",
-  标题: (readFileSync(join(OUT, "index.html"), "utf8").match(/<title>([^<]*)</) || [])[1] || "?"
+  singleFile: { path: outHtml, bytes: bytes(outHtml), MB: +(bytes(outHtml) / 1048576).toFixed(2) },
+  site: {
+    dir: SITE,
+    firstPaintBytes: firstPaint,
+    firstPaintMB: +(firstPaint / 1048576).toFixed(2),
+    firstPaintFiles,
+    audioLazy: audioInfo,
+    stamp,
+  },
+  modules: modulesClean.map((m) => m.name + ':' + m.code.length),
+  missingModules: missing,
+  stylesBytes: styleBody.length,
 }, null, 2));

@@ -1,0 +1,503 @@
+/* ==========================================================================
+   新宿决战 · 移动端 / 触屏适配样式（src/mobile.css）
+   ----------------------------------------------------------------------------
+   谁在用：src/mobile.js 会在 <html> 上加 is-touch 类，本文件所有规则都锁在
+   html.is-touch 之下 —— 桌面端一个像素都不会变。
+   本文件在构建时被追加在 styles.css 之后，所以同名选择器天然覆盖原样式。
+
+   三块内容：
+     1) 触屏控件（摇杆 / 动作键 / 技能格 / 工具键 / 播片跳过）
+     2) HUD 重排（手机横屏、竖屏、平板各自的紧凑档）
+     3) 旋转提示、移动端音量面板、操作图例等覆盖层
+   ========================================================================== */
+
+/* ==========================================================================
+   0. 变量与全局开关
+   ========================================================================== */
+
+html.is-touch {
+  /* 控件尺寸统一走 vmin：横屏时 vmin=高度，竖屏时 vmin=宽度，两端都自适应 */
+  --t-joy: clamp(104px, 32vmin, 176px);      /* 摇杆底盘直径 */
+  --t-btn: clamp(50px, 15vmin, 78px);        /* 常规动作键 */
+  --t-btn-lg: clamp(58px, 18vmin, 92px);     /* 主攻键（轻击） */
+  --t-skill: clamp(44px, 12.5vmin, 70px);    /* 技能格（复用 HUD 技能栏） */
+  --t-core-h: clamp(58px, 18vmin, 92px);     /* 底部动作行高度 */
+  --t-gap: clamp(6px, 1.5vmin, 11px);
+  --t-edge: clamp(8px, 2vmin, 18px);
+  --t-util: clamp(44px, 6vmin, 52px);        /* 右上角工具键：命中区 >=44px */
+
+  /* 空闲时半透明：把战场让出来；一碰就亮起来 */
+  --t-dim: .55;
+  --t-dim-focus: .9;
+
+  --t-ink: rgba(6, 6, 12, .62);
+  --t-ink-2: rgba(10, 12, 20, .86);
+  --t-line: rgba(255, 216, 115, .38);
+  --t-gold: #ffd873;
+  --t-cyan: #5ff0ff;
+  --t-crimson: #ff1f3d;
+  --t-violet: #b04cff;
+}
+
+/* 触屏设备：只在「游戏画面」上禁掉浏览器手势。
+   注意 touch-action 会被祖先链求交，写在 html/body 上会让子元素再也拿不回手势，
+   所以这里精确地写在 #gl / #hud / #touch-ui 三层上，界面层另给 manipulation。 */
+html.is-touch,
+html.is-touch body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+html.is-touch #gl,
+html.is-touch #hud,
+html.is-touch #touch-ui,
+html.is-touch .t-btn,
+html.is-touch .ab,
+html.is-touch .t-joy { touch-action: none; }
+/* 普通界面按钮：允许点按，但禁掉双击缩放带来的 300ms 延迟 */
+html.is-touch .screen,
+html.is-touch .screen button,
+html.is-touch .btn,
+html.is-touch .t-rbtn,
+html.is-touch .t-skip { touch-action: manipulation; }
+html.is-touch #crash-msg,
+html.is-touch .boot-diag { touch-action: auto; -webkit-user-select: text; user-select: text; }
+html.is-touch button,
+html.is-touch .ab { -webkit-tap-highlight-color: transparent; }
+
+/* 触屏设备隐藏鼠标专属的界面：滚轮音量条由右下角 ♪ 按钮接管 */
+html.is-touch .audio-panel { display: none !important; }
+/*
+  ⚠ 触屏上 .audio-dock 的 ♪ 也必须能打开面板。
+  上面那条 !important 原本把面板在触屏上彻底关死，只有触屏工具键的 .t-sheet 能展开；
+  Lead 把 .audio-dock 从 #hud 里挪出来之后，手机上一眼就能看到这个 ♪，
+  点下去却毫无反应 —— 这就是「手机上切歌没反应/听不到」的直接原因。
+  打开后朝下弹出（dock 在 46% 高度，朝上会被屏幕顶边裁掉），滑杆也放大到能用手指拖。
+  这条放在 .audio-panel.t-sheet 之前：两个入口都能用，且 .t-sheet 的定位优先级更高。 */
+html.is-touch .audio-dock.open .audio-panel {
+  display: flex !important;
+  top: 42px; bottom: auto;
+}
+html.is-touch .audio-panel label { font-size: 12px; letter-spacing: .18em; }
+html.is-touch .audio-panel input { width: 132px; height: 22px; }
+html.is-touch .audio-dock .audio-toggle { width: 40px; height: 40px; font-size: 17px; }
+
+/* 触屏层专用的显隐开关（styles.css 里只有 .hidden，本模块用自己的 .t-hidden） */
+html.is-touch .t-hidden { display: none !important; }
+
+/* ==========================================================================
+   1. 触屏控件容器
+   ========================================================================== */
+#touch-ui {
+  position: fixed; inset: 0; z-index: 30;
+  pointer-events: none;             /* 默认穿透，只有按钮自己接事件 */
+  font-family: var(--f-ui, system-ui, sans-serif);
+  transition: opacity .18s ease-out;
+}
+#touch-ui.t-off { opacity: 0; visibility: hidden; }
+#touch-ui.t-hidden { display: none; }
+
+/* 摇杆（左下拇指区）
+   命中区 = 可视底盘外扩 8px：容器用 margin:-8px 抵消掉外扩，底盘视觉位置不变。
+   这样拇指擦边还按得到，又不会顶到右下动作键簇（390 竖屏实测相交 59.5×70.2 已清零）。 */
+.t-joy {
+  position: absolute;
+  left: calc(var(--t-edge) + env(safe-area-inset-left));
+  bottom: calc(var(--t-edge) + env(safe-area-inset-bottom));
+  margin: -8px;
+  width: calc(var(--t-joy) + 16px); height: calc(var(--t-joy) + 16px);
+  pointer-events: auto;
+  opacity: var(--t-dim-focus);
+  transition: opacity .2s;
+}
+.t-joy.t-fade { opacity: var(--t-dim); }
+.t-joy-base {
+  position: absolute; inset: 8px; border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(10,12,22,.30) 0%, rgba(6,6,12,.52) 62%, rgba(6,6,12,.30) 100%);
+  border: 2px solid rgba(255, 216, 115, .55);
+  box-shadow: inset 0 0 30px rgba(0, 0, 0, .6), 0 0 20px rgba(0, 0, 0, .5), 0 0 12px rgba(255, 216, 115, .12);
+}
+/* 底盘之外不再有别的命中目标：容器比底盘大 8px 仅用于容错 */
+.t-joy-base::before,
+.t-joy-base::after {
+  content: ""; position: absolute; left: 50%; top: 50%;
+  background: linear-gradient(90deg, transparent, rgba(255,216,115,.22), transparent);
+  transform: translate(-50%, -50%);
+}
+.t-joy-base::before { width: 72%; height: 1px; }
+.t-joy-base::after { width: 1px; height: 72%;
+  background: linear-gradient(180deg, transparent, rgba(255,216,115,.22), transparent); }
+.t-joy-knob {
+  position: absolute; left: 50%; top: 50%;
+  width: 46%; height: 46%; border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle at 38% 32%, rgba(95,240,255,.95), rgba(43,134,255,.72) 52%, rgba(20,40,90,.86) 100%);
+  border: 1.5px solid rgba(255, 255, 255, .55);
+  box-shadow: 0 0 18px rgba(43,134,255,.55), inset 0 0 12px rgba(255,255,255,.28);
+  transition: box-shadow .15s, border-color .15s;
+  will-change: transform;
+}
+.t-joy.t-active .t-joy-base { border-color: rgba(95,240,255,.72); box-shadow: inset 0 0 26px rgba(0,0,0,.5), 0 0 26px rgba(43,134,255,.42); }
+.t-joy.t-active .t-joy-knob { box-shadow: 0 0 26px rgba(95,240,255,.9), inset 0 0 14px rgba(255,255,255,.4); }
+/* 推到底 = 疾走，摇杆环变金并提示 */
+.t-joy.t-push .t-joy-base { border-color: rgba(255,216,115,.95); box-shadow: inset 0 0 26px rgba(255,216,115,.22), 0 0 30px rgba(255,216,115,.55); }
+.t-joy.t-push .t-joy-knob { background: radial-gradient(circle at 38% 32%, #fff3cf, #ffd873 52%, #8a6a12 100%); }
+/* （原先的 .t-joy-hint 9px 文字已删除：触屏可读性下限是 12px，留着只会被审计打回） */
+
+/* 右下角的动作键群 */
+.t-acts {
+  position: absolute;
+  right: calc(var(--t-edge) + env(safe-area-inset-right));
+  bottom: calc(var(--t-edge) + env(safe-area-inset-bottom));
+  display: flex; align-items: flex-end; justify-content: flex-end;
+  gap: var(--t-gap);
+  pointer-events: none;
+}
+
+/* 通用按钮外观 */
+.t-btn {
+  position: relative;
+  pointer-events: auto;
+  width: var(--t-btn); height: var(--t-btn);
+  border-radius: 50%;
+  display: grid; place-items: center;
+  color: #fff; font-family: var(--f-jp, serif);
+  background:
+    radial-gradient(circle at 50% 30%, rgba(46,52,78,.95), rgba(10,11,20,.95) 72%);
+  border: 1.5px solid rgba(255,255,255,.38);
+  box-shadow: 0 3px 14px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.18), inset 0 -8px 18px rgba(0,0,0,.35);
+  opacity: var(--t-dim-focus);
+  transition: transform .07s ease-out, box-shadow .12s, border-color .12s, background .12s, opacity .2s;
+  will-change: transform;
+  overflow: hidden;
+}
+/* 手指离开 1.4 秒后整体变淡，把战场让出来；一碰立刻回亮 */
+#touch-ui.t-idle .t-btn,
+#touch-ui.t-idle #ability-bar .ab { opacity: var(--t-dim); }
+#touch-ui.t-idle .t-joy { opacity: var(--t-dim); }
+.t-btn .t-label {
+  font-size: clamp(14px, 4vmin, 22px); letter-spacing: .06em; color: #fff;
+  text-shadow: 0 1px 3px #000, 0 0 10px rgba(0,0,0,.9), 0 -1px 0 rgba(255,255,255,.25);
+}
+.t-btn .t-key {
+  position: absolute; right: 6px; bottom: 3px;
+  font-family: var(--f-num, sans-serif); font-size: 9px;
+  color: rgba(255,216,115,.65); letter-spacing: .04em;
+}
+.t-btn .t-cost {
+  position: absolute; left: 6px; top: 3px;
+  font-family: var(--f-num, sans-serif); font-size: 9px; color: rgba(95,240,255,.85);
+}
+/* 按下反馈：缩放 + 发光 + 颜色点亮 */
+.t-btn.t-down, .t-btn:active {
+  transform: scale(.9);
+  border-color: var(--t-gold);
+  box-shadow: 0 0 22px rgba(255,216,115,.7), inset 0 0 18px rgba(255,216,115,.35);
+  opacity: 1;
+}
+.t-btn.t-down { background: radial-gradient(circle at 50% 30%, rgba(96,74,26,.96), rgba(24,16,6,.94) 72%); }
+.t-btn.t-cooling { filter: grayscale(.6) brightness(.7); }
+.t-btn.t-ready { border-color: rgba(95,240,255,.5); box-shadow: 0 0 16px rgba(95,240,255,.25), inset 0 0 14px rgba(95,240,255,.10); }
+.t-btn.t-charged { animation: tCharged 1.05s ease-in-out infinite; }
+@keyframes tCharged {
+  0%, 100% { box-shadow: 0 0 10px rgba(255,216,115,.35); }
+  50% { box-shadow: 0 0 26px rgba(255,216,115,.85); }
+}
+
+/* 轻击 = 主攻键：最大、最靠拇指 */
+.t-btn.t-j {
+  width: var(--t-btn-lg); height: var(--t-btn-lg);
+  border: 2px solid rgba(95,240,255,.7);
+  background: radial-gradient(circle at 50% 30%, rgba(22,58,80,.95), rgba(8,14,24,.95) 72%);
+  box-shadow: 0 3px 16px rgba(0,0,0,.6), inset 0 0 22px rgba(95,240,255,.18);
+}
+.t-btn.t-j .t-label { font-size: clamp(17px, 4.8vmin, 26px); }
+.t-btn.t-j .t-label { color: #eaffff; }
+/* 重击 */
+.t-btn.t-k { border-color: rgba(255,31,61,.7); background: radial-gradient(circle at 50% 30%, rgba(66,18,28,.95), rgba(16,8,10,.95) 72%); }
+/* 闪避：偏左一点，用空格符号 */
+.t-btn.t-space .t-label { font-size: clamp(15px, 4.2vmin, 23px); }
+/* 终极技：蓄力 200% 茈，紫金配色，按住才亮 */
+.t-btn.t-ult {
+  border: 1.5px solid rgba(176,76,255,.75);
+  background: radial-gradient(circle at 50% 30%, rgba(56,26,84,.95), rgba(14,8,22,.95) 72%);
+}
+.t-btn.t-ult.t-down {
+  border-color: rgba(255,216,115,.95);
+  background: radial-gradient(circle at 50% 30%, rgba(96,60,26,.96), rgba(26,14,6,.95) 72%);
+}
+/* 疾走：开关态常亮 */
+.t-btn.t-dash.t-on {
+  opacity: 1; border-color: var(--t-gold);
+  box-shadow: 0 0 20px rgba(255,216,115,.55), inset 0 0 16px rgba(255,216,115,.22);
+  background: radial-gradient(circle at 50% 30%, rgba(74,58,22,.95), rgba(20,14,6,.94) 72%);
+}
+
+/* 技能格：直接复用 HUD 的 #ability-bar（冷却条/费用/字形都是现成的） */
+/* 横屏：技能格和动作键排成同一行贴着屏幕底边，
+   这样底部只吃掉约 78px（20% 屏高），中间留出 260px 的干净战场。 */
+html.is-touch #hud #ability-bar {
+  left: auto;
+  right: calc(var(--t-edge) + env(safe-area-inset-right) + var(--t-btn) * 4 + var(--t-btn-lg) + var(--t-gap) * 5);
+  top: auto;
+  bottom: calc(var(--t-edge) + env(safe-area-inset-bottom) + (var(--t-core-h) - var(--t-skill)) / 2);
+  transform: none;
+  display: flex; flex-direction: row-reverse; align-items: center; justify-content: flex-start;
+  gap: var(--t-gap);
+}
+/* 按「离拇指的距离」排优先级：领域/苍 最靠右手，200%茈 最远 */
+html.is-touch #hud .ab[data-skill="void"] { order: 1; }      /* 领域：最靠拇指 */
+html.is-touch #hud .ab[data-skill="reverse"] { order: 2; }   /* 反转自愈：保命键，第二近 */
+html.is-touch #hud .ab[data-skill="blue"] { order: 3; }
+html.is-touch #hud .ab[data-skill="red"] { order: 4; }
+html.is-touch #hud .ab[data-skill="purple"] { order: 5; }
+html.is-touch #hud .ab[data-skill="purple200"] { order: 6; }
+html.is-touch #hud .ab {
+  pointer-events: auto;
+  width: var(--t-skill); height: var(--t-skill);
+  border-radius: 12px;
+  border: 1.5px solid rgba(255,255,255,.22);
+  background: linear-gradient(180deg, rgba(22,24,38,.86), rgba(6,6,12,.9));
+  box-shadow: 0 3px 12px rgba(0,0,0,.5);
+  opacity: var(--t-dim-focus);
+  transition: transform .07s ease-out, box-shadow .12s, border-color .12s, opacity .2s;
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+  will-change: transform;
+}
+html.is-touch #hud .ab .ab-key { display: none; }   /* 触屏不需要知道键盘映射 */
+html.is-touch .t-btn .t-key { display: none; }
+/* 费用/名称给死高度：否则行高会随字体协商变化，和字形盒子擦出 1~2px 的边 */
+html.is-touch #hud .ab .ab-cost {
+  font-size: clamp(12px, 2.6vmin, 14px); top: 1px; right: 5px;
+  line-height: 12px; height: 12px; overflow: hidden;
+}
+html.is-touch #hud .ab .ab-glyph { inset: 32% 6% 33%; font-size: clamp(13px, 3.2vmin, 20px); }
+html.is-touch #hud .ab .ab-name {
+  font-size: clamp(12px, 2.7vmin, 14px); bottom: 1px; letter-spacing: 0;
+  line-height: 12px; height: 12px; white-space: nowrap; overflow: hidden; max-width: 100%;
+}
+html.is-touch #hud .ab .ab-cd-num { font-size: clamp(14px, 3.6vmin, 20px); }
+html.is-touch #hud .ab.t-down {
+  transform: scale(.9);
+  border-color: var(--t-gold);
+  box-shadow: 0 0 22px rgba(255,216,115,.75), inset 0 0 16px rgba(255,216,115,.3);
+  opacity: 1;
+}
+html.is-touch #hud .ab.ready { border-color: rgba(95,240,255,.5); }
+html.is-touch #hud #ability-bar.t-fade .ab { opacity: var(--t-dim); }
+
+/* 右上角工具键：暂停 / 全屏 / 锁视角 / 音量 / 画质
+   位置由 JS 写成 --t-util-top（= 顶栏底边 + 8px），camera-ui 重排顶栏后不会再压住 HUD；
+   横排是为了给右侧的音量坞（.audio-dock 在 46% 高度）让路。 */
+/* 工具键排在「技能栏正上方」：这是唯一在横竖屏都天然空的区域 ——
+   顶部被 HUD 占着（计时/连击/信息条/戏剧大字），右边缘有音量坞，底部是动作键。
+   位置完全由技能格的几何推导，不依赖任何动态测量，也不会随横幅出现而跳动。 */
+.t-util {
+  position: absolute;
+  right: calc(var(--t-edge) + env(safe-area-inset-right));
+  top: auto;
+  bottom: calc(var(--t-edge) + env(safe-area-inset-bottom) + (var(--t-core-h) - var(--t-skill)) / 2 + var(--t-skill) + var(--t-gap) + 10px);
+  display: flex; flex-direction: row; gap: clamp(4px, 1vmin, 7px);
+  pointer-events: none;
+}
+.t-util .t-ubtn {
+  pointer-events: auto;
+  width: var(--t-util); height: var(--t-util); border-radius: 9px;
+  display: grid; place-items: center;
+  font-size: clamp(13px, 3.4vmin, 19px); color: rgba(255,255,255,.9); font-family: var(--f-jp, serif);
+  background: var(--t-ink); border: 1.5px solid rgba(255,255,255,.34);
+  opacity: var(--t-dim); transition: opacity .2s, background .12s, border-color .12s, transform .07s;
+}
+.t-util .t-ubtn.t-down { transform: scale(.9); opacity: 1; border-color: var(--t-gold); }
+.t-util .t-ubtn.t-on { opacity: 1; border-color: var(--t-cyan); color: var(--t-cyan); box-shadow: 0 0 14px rgba(95,240,255,.35); }
+
+/* 播片跳过：整个右侧都能点，但只有一个明显的按钮 */
+.t-skip {
+  position: absolute;
+  right: calc(var(--t-edge) + env(safe-area-inset-right));
+  bottom: calc(var(--t-edge) + env(safe-area-inset-bottom));
+  pointer-events: auto;
+  padding: 13px 22px;
+  font-family: var(--f-jp, serif); font-size: clamp(13px, 3.4vmin, 19px); letter-spacing: .22em;
+  color: #fff; background: rgba(10,10,18,.82);
+  border: 1px solid rgba(255,255,255,.3);
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+}
+.t-skip.t-down { border-color: var(--t-gold); box-shadow: 0 0 22px rgba(255,216,115,.5); }
+
+/* 首次进入战斗的触屏提示条 */
+.t-tip {
+  position: absolute;
+  left: calc(var(--t-edge) + env(safe-area-inset-left));
+  bottom: calc(var(--t-edge) + env(safe-area-inset-bottom) + var(--t-joy) + 16px + 12px);
+  display: flex; gap: 14px; align-items: center;
+  padding: 8px 16px; border-radius: 999px;
+  background: rgba(6,6,12,.72); border: 1px solid var(--t-line);
+  font-size: clamp(12px, 3vmin, 15px); letter-spacing: .14em; color: rgba(232,230,223,.94);
+  opacity: 0; transition: opacity .35s; white-space: nowrap;
+}
+.t-tip.t-show { opacity: 1; }
+.t-tip b { color: var(--t-gold); font-family: var(--f-num, sans-serif); }
+
+/* ==========================================================================
+   2. HUD 重排
+   --- 手机横屏：顶部横条压到最扁，把纵向空间全留给战场
+   ========================================================================== */
+html.is-touch #hud .top-strip {
+  padding: calc(6px + env(safe-area-inset-top)) calc(10px + env(safe-area-inset-right)) 0 calc(10px + env(safe-area-inset-left));
+  gap: 10px;
+}
+html.is-touch #hud .fighter-panel { width: min(38vw, 460px); }
+html.is-touch #hud .fp-name { margin-bottom: 2px; gap: 6px; }
+html.is-touch #hud .fp-name .jp { font-size: clamp(12px, 3.2vmin, 18px); letter-spacing: .1em; }
+html.is-touch #hud .fp-name .en { display: none; }
+html.is-touch #hud .hp-bar { height: clamp(8px, 2.2vmin, 13px); }
+html.is-touch #hud .tech-bar { height: clamp(3px, .9vmin, 5px); margin-top: 2px; }
+html.is-touch #hud .dom-wrap { margin-top: 2px; font-size: 8px; letter-spacing: .18em; }
+html.is-touch #hud .center-readout { top: calc(4px + env(safe-area-inset-top)); min-width: 120px; }
+html.is-touch #hud .timer { font-size: clamp(16px, 4.4vmin, 26px); }
+html.is-touch #hud .phase-tag { font-size: 12px; letter-spacing: .08em; white-space: nowrap; }
+html.is-touch #hud .combo { top: 52px; }
+html.is-touch #hud .combo b { font-size: clamp(30px, 9vmin, 46px); }
+html.is-touch #hud .banner { font-size: clamp(18px, 5.4vmin, 30px); top: 21%; }
+html.is-touch #hud .hints { left: calc(10px + env(safe-area-inset-left)); bottom: auto; top: 34%; }
+html.is-touch #hud .hint { font-size: 10.5px; padding: 4px 9px; }
+html.is-touch #hud .clash { top: 40%; width: min(80vw, 720px); }
+html.is-touch #hud .clash-title { font-size: clamp(18px, 5vmin, 27px); letter-spacing: .3em; margin-bottom: 6px; }
+html.is-touch #hud .clash-track { height: 16px; }
+html.is-touch #hud .clash-hint { font-size: 11px; margin-top: 6px; }
+html.is-touch #hud .caption { left: 4vw; bottom: 26%; max-width: 66vw; }
+html.is-touch #hud .cine-ui { bottom: 1.2vh; left: 16px; right: 16px; }
+html.is-touch #hud .cine-skip { display: none; }   /* 触屏用右下角大按钮跳过 */
+html.is-touch #hud .bar { display: none; }          /* 电影黑边在手机上纯属浪费高度 */
+
+/* --- 竖屏：控件下沉，技能格改成 3×2，给中间的战场留出完整宽度 --- */
+@media (orientation: portrait) {
+  html.is-touch #hud #ability-bar {
+    display: grid;
+    grid-template-columns: repeat(3, var(--t-skill));
+    grid-auto-rows: var(--t-skill);
+    right: calc(var(--t-edge) + env(safe-area-inset-right));
+    bottom: calc(var(--t-edge) + env(safe-area-inset-bottom) + var(--t-core-h) + var(--t-gap));
+    justify-content: end;
+  }
+  /* 竖屏宽度只有 390：血条面板和中央计时器会撞在一起，这里把三块都收窄 */
+  html.is-touch #hud .fighter-panel { width: 33vw; }
+  html.is-touch #hud .center-readout { min-width: 92px; }
+  html.is-touch #hud .timer { font-size: clamp(13px, 4.4vw, 20px); }
+  html.is-touch #hud .phase-tag { font-size: 12px; letter-spacing: .04em; white-space: nowrap; }
+  html.is-touch #hud .hints { top: 28%; }
+  /* 竖屏左右都窄：摇杆收一档，动作键改两行（上 3 下 2），两边互不相交 */
+  html.is-touch .t-joy { --t-joy: clamp(96px, 25vw, 150px); }
+  html.is-touch .t-acts {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: calc(var(--t-btn) * 3 + var(--t-gap) * 2);
+  }
+  /* 动作簇变两行 → 核心行高度翻倍，技能栏/工具键/提示条都要跟着让位 */
+  html.is-touch { --t-core-h: calc(var(--t-btn-lg) + var(--t-btn) + var(--t-gap)); }
+  html.is-touch .t-util {
+    bottom: calc(var(--t-edge) + env(safe-area-inset-bottom) + var(--t-core-h) + var(--t-gap) + var(--t-skill) * 2 + var(--t-gap) + 10px);
+  }
+  /* 竖屏：提示条要抬到「技能栏 + 工具键」两行之上，并且不能顶到右边缘的音量坞 */
+  html.is-touch .t-tip {
+    bottom: calc(var(--t-edge) + env(safe-area-inset-bottom) + var(--t-core-h) + var(--t-gap) + var(--t-skill) * 2 + var(--t-gap) + var(--t-util) + 12px);
+    max-width: calc(100vw - var(--t-edge) * 2 - var(--t-util) - 14px);
+    white-space: normal; line-height: 1.35;
+  }
+}
+
+/* --- 平板 / 大屏触屏：控件放大一档，别贴在边上 --- */
+@media (min-width: 900px) and (min-height: 700px) {
+  /* 平板：控件放大一档，但技能格要收小 —— 5 个 70px 的格子会把技能栏一路推到左下摇杆身上 */
+  html.is-touch { --t-edge: clamp(14px, 2.4vmin, 26px); --t-dim: .55; --t-skill: clamp(44px, 7vmin, 58px); }
+}
+
+/* --- 超窄竖屏（360x640 这类）：血条面板与中央读数会贴边，收一档 --- */
+@media (max-width: 380px) {
+  html.is-touch #hud .fighter-panel { width: 31vw; }
+  html.is-touch #hud .center-readout { min-width: 84px; }
+  html.is-touch #hud .fp-name .jp { font-size: 12px; letter-spacing: .04em; }
+}
+
+/* --- 超扁屏（手机横屏带浏览器工具条）：再压一档 --- */
+@media (orientation: landscape) and (max-height: 360px) {
+  html.is-touch { --t-dim: .38; }
+  html.is-touch #hud .dom-wrap { display: none; }
+}
+
+/* ==========================================================================
+   3. 覆盖层：旋转提示 / 移动端音量面板 / 标题页操作图例
+   ========================================================================== */
+/* 竖屏提示做成「顶部卡片」而不是全屏遮罩：
+   1) 不挡住标题界面的按钮（验收脚本/玩家都能直接开局）
+   2) 想继续竖屏玩的人可以无视它，它会自己退场 */
+.t-rotate {
+  position: fixed; inset: 0; z-index: 70;
+  display: grid; place-items: start center;
+  padding-top: calc(9vh + env(safe-area-inset-top));
+  pointer-events: none;              /* 关键：背景不拦截点击 */
+  animation: tFadeIn .28s ease-out;
+}
+.t-rotate.t-hidden { display: none; }
+.t-rotate-inner {
+  pointer-events: auto;
+  text-align: center; padding: 20px 22px 18px;
+  width: min(88vw, 460px);
+  border-radius: 18px;
+  background: radial-gradient(ellipse at 50% 0%, rgba(40,16,52,.96), rgba(6,6,12,.96) 70%);
+  border: 1px solid rgba(255,216,115,.32);
+  box-shadow: 0 18px 60px rgba(0,0,0,.7);
+}
+.t-rotate-icon { margin: 0 auto 12px; width: 64px; height: 64px; animation: tPhoneSpin 2.6s ease-in-out infinite; }
+.t-rotate h2 {
+  font-family: var(--f-jp, serif); font-size: clamp(19px, 5.4vw, 30px);
+  letter-spacing: .3em; color: #fff; margin: 0 0 10px;
+  text-shadow: 0 0 26px rgba(176,76,255,.7);
+}
+.t-rotate p { color: rgba(232,230,223,.82); font-size: clamp(12px, 3.4vw, 15px); line-height: 1.8; letter-spacing: .06em; margin: 0 0 16px; }
+.t-rotate-actions { display: flex; flex-direction: row; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; }
+.t-rotate-actions .t-rbtn {
+  flex: 1 1 44%; min-width: 130px; padding: 12px 14px;
+  font-family: var(--f-jp, serif); font-size: clamp(13px, 3.6vw, 17px); letter-spacing: .2em;
+  color: #fff; background: rgba(10,10,18,.86); border: 1px solid rgba(255,255,255,.24);
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+}
+.t-rotate-actions .t-rbtn.primary { background: linear-gradient(135deg, rgba(120,14,32,.95), rgba(30,6,60,.95)); border-color: rgba(255,31,61,.7); }
+.t-rotate-actions .t-rbtn.t-down { transform: scale(.97); border-color: var(--t-gold); }
+@keyframes tPhoneSpin {
+  0%, 42% { transform: rotate(0deg); }
+  58%, 100% { transform: rotate(-90deg); }
+}
+@keyframes tFadeIn { from { opacity: 0; } }
+
+/* 移动端音量面板：从右下角弹出，滑杆加大到能用手指拖 */
+/* 音量面板挂在右上工具键左边、技能格上方 —— 不遮住任何触屏按键 */
+html.is-touch .audio-panel.t-sheet {
+  display: flex !important;
+  position: fixed;
+  right: calc(var(--t-edge) + var(--t-util) + 12px);
+  bottom: calc(var(--t-edge) + env(safe-area-inset-bottom) + var(--t-core-h) + var(--t-gap) + var(--t-skill) + 12px);
+  z-index: 62; opacity: 1;
+  padding: 12px 14px; gap: 12px;
+  background: rgba(6,6,12,.92); border: 1px solid rgba(255,255,255,.2);
+  border-radius: 14px; box-shadow: 0 12px 40px rgba(0,0,0,.6);
+  touch-action: auto;
+}
+html.is-touch .audio-panel.t-sheet label { font-size: 12px; letter-spacing: .24em; }
+html.is-touch .audio-panel.t-sheet input { width: 168px; height: 26px; }
+html.is-touch .audio-panel.t-sheet i { width: 26px; font-size: 12px; }
+
+/* 标题页的触屏操作图例（替换掉桌面键位表） */
+html.is-touch .controls-grid { display: none !important; }
+.t-legend {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px 14px; text-align: left;
+  border-top: 1px solid var(--line, rgba(255,216,115,.28));
+  border-bottom: 1px solid var(--line, rgba(255,216,115,.28));
+  padding: 12px 2px; margin-top: 4px;
+}
+.t-legend div { font-size: 12.5px; line-height: 1.7; color: rgba(232,230,223,.78); }
+.t-legend b { color: #fff; font-family: var(--f-num, sans-serif); font-size: 12px; }
+.t-legend h4 { margin: 0 0 2px; font-family: var(--f-jp, serif); font-size: 12.5px; letter-spacing: .24em; color: var(--t-gold, #ffd873); }
