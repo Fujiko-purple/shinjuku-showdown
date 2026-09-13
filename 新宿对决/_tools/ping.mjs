@@ -11,10 +11,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf("--" + n); return i >= 0 ? argv[i + 1] : d; };
 const FILE = resolve(arg("file", resolve(HERE, "../dist/site/index.html")));
+const LIVE = arg("url", "");
 const PORT = Number(arg("port", "9581"));
 const SHOT = arg("shot", "");
 const START = argv.includes("--start");
-const URL = "file:///" + FILE.replace(/\\/g, "/").split("/").map(encodeURIComponent).join("/");
+const URL = LIVE || ("file:///" + FILE.replace(/\\/g, "/").split("/").map(encodeURIComponent).join("/"));
 
 const MOBILE = argv.includes("--mobile");
 const b = new Browser({ port: PORT, width: MOBILE ? 844 : 1280, height: MOBILE ? 390 : 720 });
@@ -25,7 +26,7 @@ try {
     await b.send("Emulation.setDeviceMetricsOverride", { width: 844, height: 390, deviceScaleFactor: 2, mobile: true });
     await b.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
   }
-  await b.send("Page.navigate", { url: URL + (MOBILE ? "?touch=1" : "") });
+  await b.send("Page.navigate", { url: URL + (MOBILE ? (URL.indexOf("?") >= 0 ? "&touch=1" : "?touch=1") : "") });
   await sleep(2500);
   const boot = await b.evaluate(function () {
     return {
